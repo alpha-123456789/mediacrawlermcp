@@ -66,7 +66,7 @@ class BilibiliCrawler(AbstractCrawler):
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
         self.results = {"notes": [], "comments": {}}
-
+        self.show_count = config.CRAWLER_MAX_NOTES_COUNT
     async def start(self) -> list[dict]:
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
@@ -212,7 +212,7 @@ class BilibiliCrawler(AbstractCrawler):
                     pubtime_begin_s=0,  # Publish date start timestamp
                     pubtime_end_s=0,  # Publish date end timestamp
                 )
-                video_list: List[Dict] = videos_res.get("result")
+                video_list: List[Dict] = (videos_res.get("result") or [])[:self.show_count]
 
                 if not video_list:
                     utils.logger.info(f"[BilibiliCrawler.search_by_keywords] No more videos for '{keyword}', moving to next keyword.")

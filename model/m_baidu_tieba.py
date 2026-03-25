@@ -40,6 +40,8 @@ class TiebaNote(BaseModel):
     tieba_link: str = Field(..., description="Tieba link")
     total_replay_num: int = Field(default=0, description="Total reply count")
     total_replay_page: int = Field(default=0, description="Total reply pages")
+    like_count: int = Field(default=0, description="Like count")
+    collect_count: int = Field(default=0, description="Collect count")
     ip_location: Optional[str] = Field(default="", description="IP location")
     source_keyword: str = Field(default="", description="Source keyword")
 
@@ -58,6 +60,7 @@ class TiebaComment(BaseModel):
     publish_time: str = Field(default="", description="Publish time")
     ip_location: Optional[str] = Field(default="", description="IP location")
     sub_comment_count: int = Field(default=0, description="Sub-comment count")
+    like_count: int = Field(default=0, description="Like count")
     note_id: str = Field(..., description="Post ID")
     note_url: str = Field(..., description="Post link")
     tieba_id: str = Field(..., description="Tieba ID")

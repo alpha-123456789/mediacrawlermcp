@@ -64,8 +64,9 @@ class WeiboCrawler(AbstractCrawler):
         self.mobile_user_agent = utils.get_mobile_user_agent()
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
-
-    async def start(self):
+        self.results = {"notes": [], "comments": {}}
+        self.show_count = config.CRAWLER_MAX_NOTES_COUNT
+    async def start(self) -> list[dict]:
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
             self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
@@ -133,6 +134,11 @@ class WeiboCrawler(AbstractCrawler):
                 pass
             utils.logger.info("[WeiboCrawler.start] Weibo Crawler finished ...")
 
+            for note in self.results["notes"]:
+                note_id = note.get("mblog", {}).get("id")
+                note["comments"] = self.results["comments"].get(note_id, [])
+            return self.results["notes"]
+
     async def search(self):
         """
         search weibo note with keywords
@@ -172,6 +178,7 @@ class WeiboCrawler(AbstractCrawler):
                 note_list = filter_search_result_card(search_res.get("cards"))
                 # If full text fetching is enabled, batch get full text of posts
                 note_list = await self.batch_get_notes_full_text(note_list)
+                note_list = note_list[:self.show_count]
                 for note_item in note_list:
                     if note_item:
                         mblog: Dict = note_item.get("mblog")
@@ -179,6 +186,7 @@ class WeiboCrawler(AbstractCrawler):
                             note_id_list.append(mblog.get("id"))
                             await weibo_store.update_weibo_note(note_item)
                             await self.get_note_images(mblog)
+                            self.results["notes"].append(note_item)
 
                 page += 1
 
@@ -257,12 +265,13 @@ class WeiboCrawler(AbstractCrawler):
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[WeiboCrawler.get_note_comments] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds before fetching comments for note {note_id}")
 
-                await self.wb_client.get_note_all_comments(
+                comments = await self.wb_client.get_note_all_comments(
                     note_id=note_id,
                     crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,  # Use fixed interval instead of random
                     callback=weibo_store.batch_update_weibo_note_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
                 )
+                self.results["comments"][note_id] = comments or []
             except DataFetchError as ex:
                 utils.logger.error(f"[WeiboCrawler.get_note_comments] get note_id: {note_id} comment error: {ex}")
             except Exception as e:

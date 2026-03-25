@@ -59,8 +59,10 @@ class KuaishouCrawler(AbstractCrawler):
         self.user_agent = utils.get_user_agent()
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool, used for automatic proxy refresh
+        self.results = {"notes": [], "comments": {}}
+        self.show_count = config.CRAWLER_MAX_NOTES_COUNT
 
-    async def start(self):
+    async def start(self) -> list[dict]:
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
             self.ip_proxy_pool = await create_ip_pool(
@@ -125,6 +127,11 @@ class KuaishouCrawler(AbstractCrawler):
 
             utils.logger.info("[KuaishouCrawler.start] Kuaishou Crawler finished ...")
 
+            for note in self.results["notes"]:
+                video_id = note.get("photo", {}).get("id")
+                note["comments"] = self.results["comments"].get(video_id, [])
+            return self.results["notes"]
+
     async def search(self):
         utils.logger.info("[KuaishouCrawler.search] Begin search kuaishou keywords")
         ks_limit_count = 20  # kuaishou limit page fixed value
@@ -167,9 +174,11 @@ class KuaishouCrawler(AbstractCrawler):
                     )
                     continue
                 search_session_id = vision_search_photo.get("searchSessionId", "")
-                for video_detail in vision_search_photo.get("feeds"):
+                feeds = vision_search_photo.get("feeds")[:self.show_count]
+                for video_detail in feeds:
                     video_id_list.append(video_detail.get("photo", {}).get("id"))
                     await kuaishou_store.update_kuaishou_video(video_item=video_detail)
+                    self.results["notes"].append(video_detail)
 
                 # batch fetch video comments
                 page += 1
@@ -274,12 +283,13 @@ class KuaishouCrawler(AbstractCrawler):
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[KuaishouCrawler.get_comments] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds before fetching comments for video {video_id}")
 
-                await self.ks_client.get_video_all_comments(
+                comments = await self.ks_client.get_video_all_comments(
                     photo_id=video_id,
                     crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
                     callback=kuaishou_store.batch_update_ks_video_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
                 )
+                self.results["comments"][video_id] = comments or []
             except DataFetchError as ex:
                 utils.logger.error(
                     f"[KuaishouCrawler.get_comments] get video_id: {video_id} comment error: {ex}"

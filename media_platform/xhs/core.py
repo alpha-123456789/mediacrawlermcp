@@ -60,7 +60,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
         self.results = {"notes":[], "comments":{}}
-
+        self.show_count  = config.CRAWLER_MAX_NOTES_COUNT
     async def start(self) -> list[dict]:
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
@@ -168,6 +168,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         ) for post_item in notes_res.get("items", {}) if post_item.get("model_type") not in ("rec_query", "hot_query")
                     ]
                     note_details = await asyncio.gather(*task_list)
+                    note_details = note_details[:self.show_count]
                     for note_detail in note_details:
                         if note_detail:
                             await xhs_store.update_xhs_note(note_detail)

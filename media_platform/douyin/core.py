@@ -56,8 +56,10 @@ class DouYinCrawler(AbstractCrawler):
         self.index_url = "https://www.douyin.com"
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
+        self.results = {"notes": [], "comments": {}}
+        self.show_count = config.CRAWLER_MAX_NOTES_COUNT
 
-    async def start(self) -> None:
+    async def start(self) -> list[dict]:
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
             self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
@@ -114,6 +116,11 @@ class DouYinCrawler(AbstractCrawler):
 
             utils.logger.info("[DouYinCrawler.start] Douyin Crawler finished ...")
 
+            for note in self.results["notes"]:
+                note_id = note.get("aweme_id")
+                note["comments"] = self.results["comments"].get(note_id, [])
+            return self.results["notes"]
+
     async def search(self) -> None:
         utils.logger.info("[DouYinCrawler.search] Begin search douyin keywords")
         dy_limit_count = 10  # douyin limit page fixed value
@@ -152,7 +159,7 @@ class DouYinCrawler(AbstractCrawler):
                     break
                 dy_search_id = posts_res.get("extra", {}).get("logid", "")
                 page_aweme_list = []
-                for post_item in posts_res.get("data"):
+                for post_item in (posts_res.get("data") or [])[:self.show_count]:
                     try:
                         aweme_info: Dict = (post_item.get("aweme_info") or post_item.get("aweme_mix_info", {}).get("mix_items")[0])
                     except TypeError:
@@ -161,6 +168,7 @@ class DouYinCrawler(AbstractCrawler):
                     page_aweme_list.append(aweme_info.get("aweme_id", ""))
                     await douyin_store.update_douyin_aweme(aweme_item=aweme_info)
                     await self.get_aweme_media(aweme_item=aweme_info)
+                    self.results["notes"].append(aweme_info)
                 
                 # Batch get note comments for the current page
                 await self.batch_get_note_comments(page_aweme_list)
@@ -203,6 +211,7 @@ class DouYinCrawler(AbstractCrawler):
             if aweme_detail is not None:
                 await douyin_store.update_douyin_aweme(aweme_item=aweme_detail)
                 await self.get_aweme_media(aweme_item=aweme_detail)
+                self.results["notes"].append(aweme_detail)
         await self.batch_get_note_comments(aweme_id_list)
 
     async def get_aweme_detail(self, aweme_id: str, semaphore: asyncio.Semaphore) -> Any:
@@ -243,7 +252,7 @@ class DouYinCrawler(AbstractCrawler):
                 # Pass the list of keywords to the get_aweme_all_comments method
                 # Use fixed crawling interval
                 crawl_interval = config.CRAWLER_MAX_SLEEP_SEC
-                await self.dy_client.get_aweme_all_comments(
+                comments = await self.dy_client.get_aweme_all_comments(
                     aweme_id=aweme_id,
                     crawl_interval=crawl_interval,
                     is_fetch_sub_comments=config.ENABLE_GET_SUB_COMMENTS,
@@ -254,6 +263,7 @@ class DouYinCrawler(AbstractCrawler):
                 await asyncio.sleep(crawl_interval)
                 utils.logger.info(f"[DouYinCrawler.get_comments] Sleeping for {crawl_interval} seconds after fetching comments for aweme {aweme_id}")
                 utils.logger.info(f"[DouYinCrawler.get_comments] aweme_id: {aweme_id} comments have all been obtained and filtered ...")
+                self.results["comments"][aweme_id] = comments or []
             except DataFetchError as e:
                 utils.logger.error(f"[DouYinCrawler.get_comments] aweme_id: {aweme_id} get comments failed, error: {e}")
 

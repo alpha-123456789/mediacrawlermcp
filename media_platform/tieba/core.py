@@ -57,8 +57,10 @@ class TieBaCrawler(AbstractCrawler):
         self.user_agent = utils.get_user_agent()
         self._page_extractor = TieBaExtractor()
         self.cdp_manager = None
+        self.results = {"notes": [], "comments": {}}
+        self.show_count = config.CRAWLER_MAX_NOTES_COUNT
 
-    async def start(self) -> None:
+    async def start(self) -> list[dict]:
         """
         Start the crawler
         Returns:
@@ -141,6 +143,11 @@ class TieBaCrawler(AbstractCrawler):
 
             utils.logger.info("[BaiduTieBaCrawler.start] Tieba Crawler finished ...")
 
+            for note in self.results["notes"]:
+                note_id = note.get("note_id")
+                note["comments"] = self.results["comments"].get(note_id, [])
+            return self.results["notes"]
+
     async def search(self) -> None:
         """
         Search for notes and retrieve their comment information.
@@ -180,6 +187,7 @@ class TieBaCrawler(AbstractCrawler):
                             note_type=SearchNoteType.FIXED_THREAD,
                         )
                     )
+                    notes_list = notes_list[:self.show_count]
                     if not notes_list:
                         utils.logger.info(
                             f"[BaiduTieBaCrawler.search] Search note list is empty"
@@ -228,7 +236,7 @@ class TieBaCrawler(AbstractCrawler):
                         f"[BaiduTieBaCrawler.get_specified_tieba_notes] Get note list is empty"
                     )
                     break
-
+                note_list = note_list[:self.show_count]
                 utils.logger.info(
                     f"[BaiduTieBaCrawler.get_specified_tieba_notes] tieba name: {tieba_name} note list len: {len(note_list)}"
                 )
@@ -261,7 +269,13 @@ class TieBaCrawler(AbstractCrawler):
         for note_detail in note_details:
             if note_detail is not None:
                 note_details_model.append(note_detail)
-                await tieba_store.update_tieba_note(note_detail)
+                # 先添加到结果中，保证数据不会因为数据库保存失败而丢失
+                self.results["notes"].append(note_detail.model_dump() if hasattr(note_detail, 'model_dump') else note_detail.dict())
+                # 然后尝试保存到数据库
+                try:
+                    await tieba_store.update_tieba_note(note_detail)
+                except Exception as db_err:
+                    utils.logger.warning(f"[BaiduTieBaCrawler.get_specified_notes] Failed to save note to database: {db_err}")
         await self.batch_get_note_comments(note_details_model)
 
     async def get_note_detail_async_task(
@@ -347,12 +361,13 @@ class TieBaCrawler(AbstractCrawler):
             await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
             utils.logger.info(f"[TieBaCrawler.get_comments_async_task] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds before fetching comments for note {note_detail.note_id}")
 
-            await self.tieba_client.get_note_all_comments(
+            comments = await self.tieba_client.get_note_all_comments(
                 note_detail=note_detail,
                 crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
                 callback=tieba_store.batch_update_tieba_note_comments,
                 max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
             )
+            self.results["comments"][note_detail.note_id] = [c.model_dump() if hasattr(c, 'model_dump') else c.dict() for c in comments] if comments else []
 
     async def get_creators_and_notes(self) -> None:
         """

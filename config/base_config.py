@@ -118,7 +118,7 @@ STOP_WORDS_FILE = "./docs/hit_stopwords.txt"
 FONT_PATH = "./docs/STZHONGS.TTF"
 
 # Crawl interval
-CRAWLER_MAX_SLEEP_SEC = 0
+CRAWLER_MAX_SLEEP_SEC = 2
 
 from .bilibili_config import *
 from .xhs_config import *

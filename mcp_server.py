@@ -525,7 +525,7 @@ async def crawl_media(
     platform: str,
     crawler_type: str,
     keywords: str,
-    max_count: int = 10,
+    max_count: int = 5,
     is_get_comments: bool = False,
     is_get_sub_comments: bool = False,
     max_comments_count: int = 5,
@@ -547,7 +547,7 @@ async def crawl_media(
         platform: 平台名称，可选值: xhs, dy, ks, bili, wb, tieba, zhihu
         crawler_type: 爬取类型，可选值: search(关键词搜索), detail(指定ID详情), creator(创作者主页)
         keywords: 搜索关键词 (search类型) 或 内容ID (detail类型) 或 创作者ID (creator类型)
-        max_count: 返回帖子数量，默认10，范围1-100
+        max_count: 返回帖子数量，默认5，范围1-100
         is_get_comments: 是否爬取评论，默认False
         is_get_sub_comments: 是否爬取子评论，默认False
         max_comments_count: 返回帖子下评论数量以及每个评论的子评论的数量，默认5，范围0-50
@@ -565,7 +565,7 @@ async def crawl_media(
             "is_get_sub_comments": false,
             "max_comments_count": 5,
             "save_data_option": "",
-            "count": 10,
+            "count": 5,
             "status": "success",
             "items": [
                 {

@@ -400,6 +400,7 @@ class BaiduTieBaClient(AbstractApiClient):
             raise Exception("playwright_page is required for browser-based comment fetching")
 
         result: List[TiebaComment] = []
+        seen_comment_ids: set = set()  # Track already fetched comment IDs
         current_page = 1
         while note_detail.total_replay_page >= current_page and len(result) < max_count:
             # Construct comment page URL
@@ -425,14 +426,24 @@ class BaiduTieBaClient(AbstractApiClient):
                     utils.logger.info(f"[BaiduTieBaClient.get_note_all_comments] Page {current_page} has no comments, stopping crawl")
                     break
 
+                # Check for duplicate comments (indicates reached last page)
+                new_comments = [c for c in comments if c.comment_id not in seen_comment_ids]
+                if not new_comments:
+                    utils.logger.info(f"[BaiduTieBaClient.get_note_all_comments] Page {current_page} comments are all duplicates, reached last page")
+                    break
+
+                # Track seen comment IDs
+                for c in new_comments:
+                    seen_comment_ids.add(c.comment_id)
+
                 # Limit comment count
-                if len(result) + len(comments) > max_count:
-                    comments = comments[:max_count - len(result)]
+                if len(result) + len(new_comments) > max_count:
+                    new_comments = new_comments[:max_count - len(result)]
 
                 if callback:
-                    await callback(note_detail.note_id, comments)
+                    await callback(note_detail.note_id, new_comments)
 
-                result.extend(comments)
+                result.extend(new_comments)
 
                 # Get all sub-comments
                 await self.get_comments_all_sub_comments(

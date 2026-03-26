@@ -28,11 +28,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### 2. 安装 Node.js
-
-版本要求 >= 16.0.0：https://nodejs.org/en/download/
-
-### 3. 安装依赖
+### 2. 安装依赖
 
 ```bash
 # 进入项目目录
@@ -41,9 +37,11 @@ cd mediacrawlermcp
 # 安装 Python 依赖
 uv sync
 
-# 安装浏览器驱动
+# 安装浏览器驱动（会自动下载所需 Node.js 运行时）
 uv run playwright install chromium
 ```
+
+> **注意**：如果你需要本地开发/构建文档站点，则需要额外安装 Node.js >= 16.0.0
 
 ## 🤖 MCP 配置
 

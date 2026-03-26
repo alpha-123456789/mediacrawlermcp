@@ -286,6 +286,49 @@ class BaiduTieBaClient(AbstractApiClient):
             # Wait for page loading, using delay setting from config file
             await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
 
+            # Click "贴" tab to get note list
+            try:
+                utils.logger.info("[BaiduTieBaClient.get_notes_by_keyword] Clicking '贴' tab...")
+
+                # Try multiple selectors to find the "贴" tab
+                tab_selectors = [
+                    '.tab-item:has-text("贴")',
+                    '.card-tab .tab-item:nth-child(2)',
+                    '.tab-item.active',
+                    'text=贴',
+                ]
+
+                tab_clicked = False
+                for selector in tab_selectors:
+                    try:
+                        tab_element = await self.playwright_page.wait_for_selector(selector, timeout=5000)
+                        if tab_element:
+                            # Check if it contains "贴" text
+                            text_content = await tab_element.text_content()
+                            if "贴" in text_content:
+                                await tab_element.click()
+                                utils.logger.info(f"[BaiduTieBaClient.get_notes_by_keyword] Clicked '贴' tab with selector: {selector}")
+                                tab_clicked = True
+                                break
+                    except Exception:
+                        continue
+
+                if not tab_clicked:
+                    utils.logger.warning("[BaiduTieBaClient.get_notes_by_keyword] Could not find '贴' tab, proceeding without click")
+
+                # Wait for content to load after clicking tab
+                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+
+                # Wait for thread content to appear
+                try:
+                    await self.playwright_page.wait_for_selector(".thread-content", timeout=10000)
+                    utils.logger.info("[BaiduTieBaClient.get_notes_by_keyword] Thread content loaded")
+                except Exception:
+                    utils.logger.warning("[BaiduTieBaClient.get_notes_by_keyword] Thread content not found, proceeding anyway")
+
+            except Exception as tab_err:
+                utils.logger.warning(f"[BaiduTieBaClient.get_notes_by_keyword] Error clicking '贴' tab: {tab_err}, proceeding anyway")
+
             # Get page HTML content
             page_content = await self.playwright_page.content()
             utils.logger.info(f"[BaiduTieBaClient.get_notes_by_keyword] Successfully retrieved search page HTML, length: {len(page_content)}")
@@ -358,7 +401,6 @@ class BaiduTieBaClient(AbstractApiClient):
 
         result: List[TiebaComment] = []
         current_page = 1
-
         while note_detail.total_replay_page >= current_page and len(result) < max_count:
             # Construct comment page URL
             comment_url = f"{self._host}/p/{note_detail.note_id}?pn={current_page}"

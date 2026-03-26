@@ -131,7 +131,7 @@ class TieBaCrawler(AbstractCrawler):
             if config.CRAWLER_TYPE == "search":
                 # Search for notes and retrieve their comment information.
                 await self.search()
-                await self.get_specified_tieba_notes()
+                # await self.get_specified_tieba_notes()
             elif config.CRAWLER_TYPE == "detail":
                 # Get the information and comments of the specified post
                 await self.get_specified_notes()

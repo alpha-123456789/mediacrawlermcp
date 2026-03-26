@@ -45,7 +45,9 @@ uv run playwright install chromium
 
 ## 🤖 MCP 配置
 
-### Claude Code 配置
+### Claude Code / Cursor 配置
+
+#### macOS / Linux
 
 创建 `.claude/settings.json`：
 
@@ -63,35 +65,37 @@ uv run playwright install chromium
 }
 ```
 
-### Cursor 配置
+#### Windows（推荐）
 
-在 Cursor Settings > MCP 中添加：
+使用 cmd 切换目录后执行：
 
 ```json
 {
   "mcpServers": {
     "mediacrawler": {
-      "command": "uv",
-      "args": ["run", "python", "mcp_server.py"],
-      "env": {
-        "PYTHONPATH": "."
-      }
+      "command": "cmd",
+      "args": [
+        "/c",
+        "cd /d D:\\mcp_work\\mediacrawlermcp && uv run python mcp_server.py"
+      ]
     }
   }
 }
 ```
 
-### Windows 绝对路径（备用）
+#### Windows（备用：直接调用虚拟环境 Python）
+
+如果 `uv` 命令有问题，可以直接调用虚拟环境的 Python（注意：必须先 cd 到项目目录）：
 
 ```json
 {
   "mcpServers": {
     "mediacrawler": {
-      "command": "D:\\你的路径\\mediacrawlermcp\\.venv\\Scripts\\python.exe",
-      "args": ["mcp_server.py"],
-      "env": {
-        "PYTHONPATH": "D:\\你的路径\\mediacrawlermcp"
-      }
+      "command": "cmd",
+      "args": [
+        "/c",
+        "cd /d D:\\mcp_work\\mediacrawlermcp && .venv\\Scripts\\python.exe mcp_server.py"
+      ]
     }
   }
 }
@@ -120,7 +124,7 @@ uv run playwright install chromium
 - `platform`: 平台代码（xhs/dy/ks/bili/wb/tieba/zhihu）
 - `crawler_type`: 爬取类型（search/detail/creator）
 - `keywords`: 关键词/ID/用户ID
-- `max_count`: 返回数量（1-100，默认10）
+- `max_count`: 返回数量（1-100，默认5）
 - `is_get_comments`: 是否获取评论（默认false）
 - `is_get_sub_comments`: 是否获取子评论（默认false）
 - `max_comments_count`: 评论数量（0-50，默认5）

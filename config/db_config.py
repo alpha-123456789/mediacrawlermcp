@@ -19,6 +19,13 @@
 
 
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# 加载项目根目录的 .env 文件（不依赖当前工作目录）
+BASE_DIR = Path(__file__).parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 # mysql config
 MYSQL_DB_PWD = os.getenv("MYSQL_DB_PWD", "123456")

@@ -63,8 +63,6 @@ class ZhihuCrawler(AbstractCrawler):
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
         self.results = {"notes": [], "comments": {}}
-        self.show_count = config.CRAWLER_MAX_NOTES_COUNT
-
     async def start(self) -> list[dict]:
         """
         Start the crawler
@@ -147,14 +145,12 @@ class ZhihuCrawler(AbstractCrawler):
             for note in self.results["notes"]:
                 note_id = note.get("content_id")
                 note["comments"] = self.results["comments"].get(note_id, [])
-            return self.results["notes"]
+            return self.results["notes"][:config.CRAWLER_MAX_NOTES_COUNT]
 
     async def search(self) -> None:
         """Search for notes and retrieve their comment information."""
         utils.logger.info("[ZhihuCrawler.search] Begin search zhihu keywords")
         zhihu_limit_count = 20  # zhihu limit page fixed value
-        if config.CRAWLER_MAX_NOTES_COUNT < zhihu_limit_count:
-            config.CRAWLER_MAX_NOTES_COUNT = zhihu_limit_count
         start_page = config.START_PAGE
         for keyword in config.KEYWORDS.split(","):
             source_keyword_var.set(keyword)
@@ -163,8 +159,8 @@ class ZhihuCrawler(AbstractCrawler):
             )
             page = 1
             while (
-                page - start_page + 1
-            ) * zhihu_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
+                page - start_page
+            ) * zhihu_limit_count < config.CRAWLER_MAX_NOTES_COUNT:
                 if page < start_page:
                     utils.logger.info(f"[ZhihuCrawler.search] Skip page {page}")
                     page += 1
@@ -186,20 +182,24 @@ class ZhihuCrawler(AbstractCrawler):
                     if not content_list:
                         utils.logger.info("No more content!")
                         break
-                    content_list = content_list[:self.show_count]
                     # Sleep after page navigation
                     await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                     utils.logger.info(f"[ZhihuCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
 
                     page += 1
                     for content in content_list:
-                        await zhihu_store.update_zhihu_content(content)
+                        if len(self.results["notes"]) >= config.CRAWLER_MAX_NOTES_COUNT:
+                            break
                         self.results["notes"].append(content.model_dump() if hasattr(content, 'model_dump') else content.dict())
-
+                        await zhihu_store.update_zhihu_content(content)
                     await self.batch_get_content_comments(content_list)
+                    if len(self.results["notes"]) >= config.CRAWLER_MAX_NOTES_COUNT:
+                        break
+
                 except DataFetchError:
                     utils.logger.error("[ZhihuCrawler.search] Search content error")
                     return
+
 
     async def batch_get_content_comments(self, content_list: List[ZhihuContent]):
         """
@@ -252,7 +252,7 @@ class ZhihuCrawler(AbstractCrawler):
                 callback=zhihu_store.batch_update_zhihu_note_comments,
             )
             self.results["comments"][content_item.content_id] = [c.model_dump() if hasattr(c, 'model_dump') else c.dict() for c in comments] if comments else []
-
+            self.results["comments"] = self.results["comments"][:config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES]
     async def get_creators_and_notes(self) -> None:
         """
         Get creator's information and their notes and comments

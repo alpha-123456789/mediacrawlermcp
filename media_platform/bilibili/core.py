@@ -66,7 +66,6 @@ class BilibiliCrawler(AbstractCrawler):
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
         self.results = {"notes": [], "comments": {}}
-        self.show_count = config.CRAWLER_MAX_NOTES_COUNT
     async def start(self) -> list[dict]:
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
@@ -189,14 +188,12 @@ class BilibiliCrawler(AbstractCrawler):
         """
         utils.logger.info("[BilibiliCrawler.search_by_keywords] Begin search bilibli keywords")
         bili_limit_count = 20  # bilibili limit page fixed value
-        if config.CRAWLER_MAX_NOTES_COUNT < bili_limit_count:
-            config.CRAWLER_MAX_NOTES_COUNT = bili_limit_count
         start_page = config.START_PAGE  # start page number
         for keyword in config.KEYWORDS.split(","):
             source_keyword_var.set(keyword)
             utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Current search keyword: {keyword}")
             page = 1
-            while (page - start_page + 1) * bili_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
+            while (page - start_page) * bili_limit_count < config.CRAWLER_MAX_NOTES_COUNT:
                 if page < start_page:
                     utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Skip page: {page}")
                     page += 1
@@ -212,7 +209,7 @@ class BilibiliCrawler(AbstractCrawler):
                     pubtime_begin_s=0,  # Publish date start timestamp
                     pubtime_end_s=0,  # Publish date end timestamp
                 )
-                video_list: List[Dict] = (videos_res.get("result") or [])[:self.show_count]
+                video_list: List[Dict] = videos_res.get("result")
 
                 if not video_list:
                     utils.logger.info(f"[BilibiliCrawler.search_by_keywords] No more videos for '{keyword}', moving to next keyword.")
@@ -227,8 +224,10 @@ class BilibiliCrawler(AbstractCrawler):
                 video_items = await asyncio.gather(*task_list)
                 for video_item in video_items:
                     if video_item:
-                        video_id_list.append(video_item.get("View").get("aid"))
+                        if len(self.results["notes"]) >= config.CRAWLER_MAX_NOTES_COUNT:
+                            break
                         self.results["notes"].append(video_item)
+                        video_id_list.append(video_item.get("View").get("aid"))
                         await bilibili_store.update_bilibili_video(video_item)
                         await bilibili_store.update_up_info(video_item)
                         await self.get_bilibili_video(video_item, semaphore)
@@ -239,6 +238,9 @@ class BilibiliCrawler(AbstractCrawler):
                 utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
 
                 await self.batch_get_video_comments(video_id_list)
+
+                if len(self.results["notes"]) >= config.CRAWLER_MAX_NOTES_COUNT:
+                    break
 
     async def search_by_keywords_in_time_range(self, daily_limit: bool):
         """

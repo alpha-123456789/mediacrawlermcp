@@ -60,7 +60,6 @@ class XiaoHongShuCrawler(AbstractCrawler):
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
         self.results = {"notes":[], "comments":{}}
-        self.show_count  = config.CRAWLER_MAX_NOTES_COUNT
     async def start(self) -> list[dict]:
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
@@ -124,21 +123,19 @@ class XiaoHongShuCrawler(AbstractCrawler):
             for note in self.results["notes"]:
                 note_id = note.get("note_id")
                 note["comments"] = self.results["comments"].get(note_id, [])
-            return self.results["notes"]
+            return self.results["notes"][:config.CRAWLER_MAX_NOTES_COUNT]
 
     async def search(self) -> None:
         """Search for notes and retrieve their comment information."""
         utils.logger.info("[XiaoHongShuCrawler.search] Begin search Xiaohongshu keywords")
         xhs_limit_count = 20  # Xiaohongshu limit page fixed value
-        if config.CRAWLER_MAX_NOTES_COUNT < xhs_limit_count:
-            config.CRAWLER_MAX_NOTES_COUNT = xhs_limit_count
         start_page = config.START_PAGE
         for keyword in config.KEYWORDS.split(","):
             source_keyword_var.set(keyword)
             utils.logger.info(f"[XiaoHongShuCrawler.search] Current search keyword: {keyword}")
             page = 1
             search_id = get_search_id()
-            while (page - start_page + 1) * xhs_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
+            while (page - start_page) * xhs_limit_count < config.CRAWLER_MAX_NOTES_COUNT:
                 if page < start_page:
                     utils.logger.info(f"[XiaoHongShuCrawler.search] Skip page {page}")
                     page += 1
@@ -168,14 +165,16 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         ) for post_item in notes_res.get("items", {}) if post_item.get("model_type") not in ("rec_query", "hot_query")
                     ]
                     note_details = await asyncio.gather(*task_list)
-                    note_details = note_details[:self.show_count]
                     for note_detail in note_details:
                         if note_detail:
+                            if len(self.results["notes"]) >= config.CRAWLER_MAX_NOTES_COUNT:
+                                break
+                            self.results["notes"].append(note_detail)
+                            note_ids.append(note_detail.get("note_id"))
                             await xhs_store.update_xhs_note(note_detail)
                             await self.get_notice_media(note_detail)
-                            note_ids.append(note_detail.get("note_id"))
                             xsec_tokens.append(note_detail.get("xsec_token"))
-                            self.results["notes"].append(note_detail)
+
                     page += 1
                     utils.logger.info(f"[XiaoHongShuCrawler.search] Note details: {note_details}")
                     await self.batch_get_note_comments(note_ids, xsec_tokens)
@@ -183,9 +182,14 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     # Sleep after each page navigation
                     await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                     utils.logger.info(f"[XiaoHongShuCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
+
+                    if len(self.results["notes"]) >= config.CRAWLER_MAX_NOTES_COUNT:
+                        break
+
                 except DataFetchError:
                     utils.logger.error("[XiaoHongShuCrawler.search] Get note detail error")
                     break
+
 
     async def get_creators_and_notes(self) -> None:
         """Get creator's notes and retrieve their comment information."""

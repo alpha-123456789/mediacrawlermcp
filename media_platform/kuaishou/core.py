@@ -60,8 +60,6 @@ class KuaishouCrawler(AbstractCrawler):
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool, used for automatic proxy refresh
         self.results = {"notes": [], "comments": {}}
-        self.show_count = config.CRAWLER_MAX_NOTES_COUNT
-
     async def start(self) -> list[dict]:
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
@@ -135,8 +133,6 @@ class KuaishouCrawler(AbstractCrawler):
     async def search(self):
         utils.logger.info("[KuaishouCrawler.search] Begin search kuaishou keywords")
         ks_limit_count = 20  # kuaishou limit page fixed value
-        if config.CRAWLER_MAX_NOTES_COUNT < ks_limit_count:
-            config.CRAWLER_MAX_NOTES_COUNT = ks_limit_count
         start_page = config.START_PAGE
         for keyword in config.KEYWORDS.split(","):
             search_session_id = ""
@@ -146,8 +142,8 @@ class KuaishouCrawler(AbstractCrawler):
             )
             page = 1
             while (
-                page - start_page + 1
-            ) * ks_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
+                page - start_page
+            ) * ks_limit_count < config.CRAWLER_MAX_NOTES_COUNT:
                 if page < start_page:
                     utils.logger.info(f"[KuaishouCrawler.search] Skip page: {page}")
                     page += 1
@@ -165,20 +161,23 @@ class KuaishouCrawler(AbstractCrawler):
                     utils.logger.error(
                         f"[KuaishouCrawler.search] search info by keyword:{keyword} not found data"
                     )
-                    continue
+                    break
 
                 vision_search_photo: Dict = videos_res.get("visionSearchPhoto")
                 if vision_search_photo.get("result") != 1:
                     utils.logger.error(
                         f"[KuaishouCrawler.search] search info by keyword:{keyword} not found data "
                     )
+                    page += 1
                     continue
                 search_session_id = vision_search_photo.get("searchSessionId", "")
-                feeds = vision_search_photo.get("feeds")[:self.show_count]
-                for video_detail in feeds:
+                for video_detail in vision_search_photo.get("feeds"):
+                    if len(self.results["notes"]) >= config.CRAWLER_MAX_NOTES_COUNT:
+                        break
+                    self.results["notes"].append(video_detail)
                     video_id_list.append(video_detail.get("photo", {}).get("id"))
                     await kuaishou_store.update_kuaishou_video(video_item=video_detail)
-                    self.results["notes"].append(video_detail)
+
 
                 # batch fetch video comments
                 page += 1
@@ -188,6 +187,9 @@ class KuaishouCrawler(AbstractCrawler):
                 utils.logger.info(f"[KuaishouCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
 
                 await self.batch_get_video_comments(video_id_list)
+
+                if len(self.results["notes"]) >= config.CRAWLER_MAX_NOTES_COUNT:
+                    break
 
     async def get_specified_videos(self):
         """Get the information and comments of the specified post"""

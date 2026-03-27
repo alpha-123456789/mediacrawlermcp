@@ -58,8 +58,6 @@ class TieBaCrawler(AbstractCrawler):
         self._page_extractor = TieBaExtractor()
         self.cdp_manager = None
         self.results = {"notes": [], "comments": {}}
-        self.show_count = config.CRAWLER_MAX_NOTES_COUNT
-
     async def start(self) -> list[dict]:
         """
         Start the crawler
@@ -158,8 +156,6 @@ class TieBaCrawler(AbstractCrawler):
             "[BaiduTieBaCrawler.search] Begin search baidu tieba keywords"
         )
         tieba_limit_count = 10  # tieba limit page fixed value
-        if config.CRAWLER_MAX_NOTES_COUNT < tieba_limit_count:
-            config.CRAWLER_MAX_NOTES_COUNT = tieba_limit_count
         start_page = config.START_PAGE
         for keyword in config.KEYWORDS.split(","):
             source_keyword_var.set(keyword)
@@ -168,8 +164,8 @@ class TieBaCrawler(AbstractCrawler):
             )
             page = 1
             while (
-                page - start_page + 1
-            ) * tieba_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
+                page - start_page
+            ) * tieba_limit_count < config.CRAWLER_MAX_NOTES_COUNT:
                 if page < start_page:
                     utils.logger.info(f"[BaiduTieBaCrawler.search] Skip page {page}")
                     page += 1
@@ -187,7 +183,6 @@ class TieBaCrawler(AbstractCrawler):
                             note_type=SearchNoteType.FIXED_THREAD,
                         )
                     )
-                    notes_list = notes_list[:self.show_count]
                     if not notes_list:
                         utils.logger.info(
                             f"[BaiduTieBaCrawler.search] Search note list is empty"
@@ -205,11 +200,16 @@ class TieBaCrawler(AbstractCrawler):
                     utils.logger.info(f"[TieBaCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page}")
 
                     page += 1
+
+                    if len(self.results["notes"]) >= config.CRAWLER_MAX_NOTES_COUNT:
+                        break
+
                 except Exception as ex:
                     utils.logger.error(
                         f"[BaiduTieBaCrawler.search] Search keywords error, current page: {page}, current keyword: {keyword}, err: {ex}"
                     )
                     break
+
 
     async def get_specified_tieba_notes(self):
         """
@@ -218,14 +218,12 @@ class TieBaCrawler(AbstractCrawler):
 
         """
         tieba_limit_count = 50
-        if config.CRAWLER_MAX_NOTES_COUNT < tieba_limit_count:
-            config.CRAWLER_MAX_NOTES_COUNT = tieba_limit_count
         for tieba_name in config.TIEBA_NAME_LIST:
             utils.logger.info(
                 f"[BaiduTieBaCrawler.get_specified_tieba_notes] Begin get tieba name: {tieba_name}"
             )
             page_number = 0
-            while page_number <= config.CRAWLER_MAX_NOTES_COUNT:
+            while page_number < config.CRAWLER_MAX_NOTES_COUNT:
                 note_list: List[TiebaNote] = (
                     await self.tieba_client.get_notes_by_tieba_name(
                         tieba_name=tieba_name, page_num=page_number
@@ -236,7 +234,6 @@ class TieBaCrawler(AbstractCrawler):
                         f"[BaiduTieBaCrawler.get_specified_tieba_notes] Get note list is empty"
                     )
                     break
-                note_list = note_list[:self.show_count]
                 utils.logger.info(
                     f"[BaiduTieBaCrawler.get_specified_tieba_notes] tieba name: {tieba_name} note list len: {len(note_list)}"
                 )
@@ -268,6 +265,8 @@ class TieBaCrawler(AbstractCrawler):
         note_details_model: List[TiebaNote] = []
         for note_detail in note_details:
             if note_detail is not None:
+                if len(self.results["notes"]) >= config.CRAWLER_MAX_NOTES_COUNT:
+                    break
                 note_details_model.append(note_detail)
                 # 先添加到结果中，保证数据不会因为数据库保存失败而丢失
                 self.results["notes"].append(note_detail.model_dump() if hasattr(note_detail, 'model_dump') else note_detail.dict())

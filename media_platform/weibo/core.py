@@ -65,7 +65,6 @@ class WeiboCrawler(AbstractCrawler):
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
         self.results = {"notes": [], "comments": {}}
-        self.show_count = config.CRAWLER_MAX_NOTES_COUNT
     async def start(self) -> list[dict]:
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
@@ -146,8 +145,6 @@ class WeiboCrawler(AbstractCrawler):
         """
         utils.logger.info("[WeiboCrawler.search] Begin search weibo keywords")
         weibo_limit_count = 10  # weibo limit page fixed value
-        if config.CRAWLER_MAX_NOTES_COUNT < weibo_limit_count:
-            config.CRAWLER_MAX_NOTES_COUNT = weibo_limit_count
         start_page = config.START_PAGE
 
         # Set the search type based on the configuration for weibo
@@ -167,7 +164,7 @@ class WeiboCrawler(AbstractCrawler):
             source_keyword_var.set(keyword)
             utils.logger.info(f"[WeiboCrawler.search] Current search keyword: {keyword}")
             page = 1
-            while (page - start_page + 1) * weibo_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
+            while (page - start_page) * weibo_limit_count < config.CRAWLER_MAX_NOTES_COUNT:
                 if page < start_page:
                     utils.logger.info(f"[WeiboCrawler.search] Skip page: {page}")
                     page += 1
@@ -178,15 +175,17 @@ class WeiboCrawler(AbstractCrawler):
                 note_list = filter_search_result_card(search_res.get("cards"))
                 # If full text fetching is enabled, batch get full text of posts
                 note_list = await self.batch_get_notes_full_text(note_list)
-                note_list = note_list[:self.show_count]
                 for note_item in note_list:
                     if note_item:
                         mblog: Dict = note_item.get("mblog")
                         if mblog:
+                            if len(self.results["notes"]) >= config.CRAWLER_MAX_NOTES_COUNT:
+                                break
+                            self.results["notes"].append(note_item)
                             note_id_list.append(mblog.get("id"))
                             await weibo_store.update_weibo_note(note_item)
                             await self.get_note_images(mblog)
-                            self.results["notes"].append(note_item)
+
 
                 page += 1
 
@@ -195,6 +194,9 @@ class WeiboCrawler(AbstractCrawler):
                 utils.logger.info(f"[WeiboCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
 
                 await self.batch_get_notes_comments(note_id_list)
+
+                if len(self.results["notes"]) >= config.CRAWLER_MAX_NOTES_COUNT:
+                    break
 
     async def get_specified_notes(self):
         """

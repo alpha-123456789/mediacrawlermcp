@@ -180,3 +180,4 @@ debug_tools
 
 database/*.db
 .claude/
+reports/

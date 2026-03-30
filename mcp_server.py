@@ -8,7 +8,8 @@
 # 提供社交媒体平台数据爬取服务的 MCP 服务器
 # 支持平台：小红书、抖音、快手、B站、微博、贴吧、知乎
 
-import json
+import json,os
+from datetime import datetime
 import asyncio
 from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass
@@ -16,6 +17,18 @@ from enum import Enum
 
 from mcp.server.fastmcp import FastMCP
 from mcp_adapter import run_crawl_sync
+from report_generator import generate_report, generate_report_content
+
+# 平台名称映射
+PLATFORM_NAMES = {
+    'xhs': '小红书',
+    'dy': '抖音',
+    'ks': '快手',
+    'bili': 'B站',
+    'wb': '微博',
+    'tieba': '百度贴吧',
+    'zhihu': '知乎'
+}
 
 
 # =========================
@@ -525,14 +538,15 @@ async def crawl_media(
     platform: str,
     crawler_type: str,
     keywords: str,
-    max_count: int = 5,
+    max_count: int = 20,
     is_get_comments: bool = False,
     is_get_sub_comments: bool = False,
-    max_comments_count: int = 5,
+    max_comments_count: int = 20,
     save_data_option: str = "",
+    output_path: str = "reports",
 ) -> str:
     """
-    爬取社交媒体平台帖子、评论数据
+    爬取社交媒体平台帖子、评论数据，并生成舆情分析报告
 
     支持平台：
     - xhs: 小红书
@@ -547,36 +561,24 @@ async def crawl_media(
         platform: 平台名称，可选值: xhs, dy, ks, bili, wb, tieba, zhihu
         crawler_type: 爬取类型，可选值: search(关键词搜索), detail(指定ID详情), creator(创作者主页)
         keywords: 搜索关键词 (search类型) 或 内容ID (detail类型) 或 创作者ID (creator类型)
-        max_count: 返回帖子数量，默认5，范围1-100
+        max_count: 返回帖子数量，默认20，范围1-100
         is_get_comments: 是否爬取评论，默认False
         is_get_sub_comments: 是否爬取子评论，默认False
-        max_comments_count: 返回帖子下评论数量以及每个评论的子评论的数量，默认5，范围0-50
+        max_comments_count: 返回帖子下评论数量以及每个评论的子评论的数量，默认20，范围0-50
         save_data_option: 数据存储方式，可选值: ""(不存储), "db"(存储到数据库)，默认""
+        output_path: 报告保存目录，默认"reports"
 
     Returns:
-        JSON格式的爬取结果，包含平台信息、爬取参数、数据条数和数据列表
+        JSON格式的报告结果，包含报告文件路径和分析摘要
 
     Example:
         {
-            "platform": "xhs",
-            "crawler_type": "search",
-            "keywords": "Python编程",
-            "is_get_comments": true,
-            "is_get_sub_comments": false,
-            "max_comments_count": 5,
-            "save_data_option": "",
-            "count": 5,
             "status": "success",
-            "items": [
-                {
-                    "note_id": "123456",
-                    "title": "标题",
-                    "nickname": "作者昵称",
-                    "interact_info": {...},
-                    "desc": "正文描述",
-                    "comments": [...]
-                }
-            ]
+            "platform": "xhs",
+            "keywords": "Python编程",
+            "report_path": "reports/小红书_Python编程_趋势报告_20250330_143000.html",
+            "summary": "...",
+            "message": "舆情分析报告已生成"
         }
     """
     try:
@@ -623,9 +625,9 @@ async def crawl_media(
                     "is_get_sub_comments": is_get_sub_comments,
                     "max_comments_count": max_comments_count,
                     "save_data_option": save_data_option,
-                    "count": 0,
-                    "message": "未获取到任何数据",
-                    "items": []
+                    "report_path": None,
+                    "summary": "未获取到任何数据",
+                    "message": "未获取到任何数据"
                 },
                 ensure_ascii=False,
             )
@@ -633,35 +635,71 @@ async def crawl_media(
         # 处理平台数据
         items = process_platform_data(platform, raw_data)
 
-        # 构建返回结果
-        result = CrawlResult(
-            platform=platform,
-            crawler_type=crawler_type,
-            keywords=keywords,
-            is_get_comments=is_get_comments,
-            is_get_sub_comments=is_get_sub_comments,
-            max_comments_count=max_comments_count,
-            save_data_option=save_data_option,
-            count=len(items),
-            items=items,
-            status="success"
-        )
+        # 生成舆情分析报告
+        try:
+            platform_name = PLATFORM_NAMES.get(platform, platform)
 
-        return json.dumps(
-            {
-                "status": result.status,
-                "platform": result.platform,
-                "crawler_type": result.crawler_type,
-                "keywords": result.keywords,
-                "is_get_comments": result.is_get_comments,
-                "is_get_sub_comments": result.is_get_sub_comments,
-                "max_comments_count": result.max_comments_count,
-                "save_data_option": result.save_data_option,
-                "count": result.count,
-                "items": result.items
-            },
-            ensure_ascii=False,
-        )
+            # 生成并保存报告到 MCP 项目目录
+            report_path, summary, html_content = generate_report(
+                platform=platform,
+                keywords=keywords,
+                data=items,
+                output_path="reports"
+            )
+
+            # 转换为绝对路径，便于点击访问
+            abs_path = os.path.abspath(report_path)
+
+            # 返回报告信息
+            return json.dumps(
+                {
+                    "status": "success",
+                    "platform": platform,
+                    "platform_name": platform_name,
+                    "crawler_type": crawler_type,
+                    "keywords": keywords,
+                    "is_get_comments": is_get_comments,
+                    "is_get_sub_comments": is_get_sub_comments,
+                    "max_comments_count": max_comments_count,
+                    "report_path": abs_path,  # 绝对路径，可点击打开
+                    "relative_path": report_path,
+                    "summary": summary,
+                    "html_content": html_content,
+                    "message": f"舆情分析报告已生成: {abs_path}"
+                },
+                ensure_ascii=False,
+            )
+        except Exception as e:
+            # 如果生成报告失败，回退到返回原始数据
+            result = CrawlResult(
+                platform=platform,
+                crawler_type=crawler_type,
+                keywords=keywords,
+                is_get_comments=is_get_comments,
+                is_get_sub_comments=is_get_sub_comments,
+                max_comments_count=max_comments_count,
+                save_data_option=save_data_option,
+                count=len(items),
+                items=items,
+                status="success"
+            )
+
+            return json.dumps(
+                {
+                    "status": result.status,
+                    "platform": result.platform,
+                    "crawler_type": result.crawler_type,
+                    "keywords": result.keywords,
+                    "is_get_comments": result.is_get_comments,
+                    "is_get_sub_comments": result.is_get_sub_comments,
+                    "max_comments_count": result.max_comments_count,
+                    "save_data_option": result.save_data_option,
+                    "count": result.count,
+                    "items": result.items,
+                    "report_error": str(e)
+                },
+                ensure_ascii=False,
+            )
 
     except Exception as e:
         return json.dumps(

@@ -1,82 +1,116 @@
-# CLAUDE.md
+# MediaCrawler MCP 项目指南
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## 项目概述
 
-## Project Overview
+这是 MediaCrawler 的 MCP (Model Context Protocol) 服务器实现，支持爬取小红书、抖音、快手、B站、微博、贴吧、知乎等平台数据。
 
-MediaCrawler is a multi-platform social media data crawler supporting Xiaohongshu (XHS), Douyin, Kuaishou, Bilibili, Weibo, Tieba, and Zhihu. It uses Playwright for browser automation with login state preservation and CDP mode for anti-detection.
+## 核心用法：`crawl_media` 工具
 
-## Common Commands
+**爬取数据并自动生成舆情分析报告**
 
-```bash
-# Install dependencies (requires uv)
-uv sync
-
-# Install browser driver
-uv run playwright install
-
-# Run crawler - keyword search
-uv run main.py --platform xhs --lt qrcode --type search
-
-# Run crawler - post details by ID
-uv run main.py --platform xhs --lt qrcode --type detail
-
-# Run crawler - creator homepage
-uv run main.py --platform xhs --lt qrcode --type creator
-
-# View all available options
-uv run main.py --help
-
-# Start WebUI (FastAPI)
-uv run uvicorn api.main:app --port 8080 --reload
-
-# Run tests
-uv run pytest
-
-# Run type checking
-uv run mypy
-
-# Run pre-commit hooks
-uv run pre-commit run --all-files
+```
+crawl_media(
+    platform="xhs",          # 平台: xhs/dy/ks/bili/wb/tieba/zhihu
+    crawler_type="search",   # 类型: search/detail/creator
+    keywords="宝宝巴士",    # 搜索关键词
+    max_count=20,            # 爬取数量 (1-100)
+    is_get_comments=true,    # 是否获取评论
+    max_comments_count=10,   # 每条评论数 (0-50)
+    output_path="reports"    # 报告输出目录
+)
 ```
 
-## Architecture
+**返回数据结构：**
+```json
+{
+    "status": "success",
+    "platform": "bili",
+    "platform_name": "B站",
+    "keywords": "宝宝巴士",
+    "report_path": "D:\\mcp_work\\mediacrawlermcp\\reports\\B站_宝宝巴士_趋势报告_xxx.html",
+    "relative_path": "reports\\B站_宝宝巴士_趋势报告_xxx.html",
+    "summary": "控制台可读的舆情分析摘要",
+    "html_content": "完整的HTML报告内容",
+    "message": "舆情分析报告已生成"
+}
+```
 
-### Crawler Factory Pattern
-Entry point is `main.py` with `CrawlerFactory` that creates platform-specific crawlers via `CrawlerFactory.create_crawler(platform)`.
+**返回字段说明：**
+- `report_path`: 绝对路径，可点击打开
+- `relative_path`: 相对路径
+- `summary`: 控制台可显示的文本摘要
+- `html_content`: 完整HTML内容（客户端可自行保存）
 
-### Platform Modules
-Each platform lives in `media_platform/{platform}/` with:
-- `core.py` - Main crawler implementation
-- `client.py` - API client with request handling
-- `login.py` - Login logic (QR code, phone, cookies)
-- `xhs_sign.py` / `playwright_sign.py` - Signature generation for API requests
+## 示例场景
 
-### Abstract Base Classes
-Defined in `base/base_crawler.py`:
-- `AbstractCrawler` - Core crawler interface (start, search, launch_browser)
-- `AbstractLogin` - Login interface (begin, login_by_qrcode, login_by_mobile, login_by_cookies)
-- `AbstractStore` - Data storage interface (store_content, store_comment, store_creator)
-- `AbstractApiClient` - HTTP client interface (request, update_cookies)
+### 场景1：小红书品牌舆情监测
+```python
+# 分析小红书关于"完美日记"的用户反馈
+result = await crawl_media(
+    platform="xhs",
+    keywords="完美日记",
+    max_count=50,
+    is_get_comments=True
+)
+print(result["summary"])  # 显示分析摘要
+```
 
-### Storage Backends
-In `store/` and `database/`, supporting: CSV, JSON, JSONL, SQLite, Excel, MySQL, PostgreSQL, MongoDB. Configured via `config/base_config.SAVE_DATA_OPTION`.
+### 场景2：B站热点话题分析
+```python
+# 抓取B站"宝宝巴士"相关内容做舆情分析
+result = await crawl_media(
+    platform="bili",
+    crawler_type="search",
+    keywords="宝宝巴士广告",
+    max_count=2,
+    is_get_comments=True,
+    max_comments_count=3
+)
+# 报告保存在 MCP 项目 reports 目录下
+# 可直接点击 report_path 打开
+```
 
-### Configuration
-- `config/base_config.py` - Main settings (platform, keywords, login type, CDP mode, data storage)
-- `config/*_config.py` - Platform-specific configurations
-- CLI arguments in `cmd_arg/arg.py` using typer
+### 场景3：竞品对比分析（多平台）
+```python
+# 分别分析B站和抖音上的同一品牌
+bili_result = await crawl_media(platform="bili", keywords="宝宝巴士")
+dy_result = await crawl_media(platform="dy", keywords="宝宝巴士")
+```
 
-### Data Models
-SQLAlchemy models in `database/models.py` and Pydantic models in `model/m_*.py` for each platform.
+## 生成的报告内容
 
-## Key Patterns
+HTML 报告自动包含：
+1. 📈 核心数据概览（内容数、评论数、情感分布）
+2. 💭 情感分析可视化（饼图）
+3. ☁️ 热门讨论词云
+4. 💡 舆情洞察与分析建议
+5. 💬 代表性评论展示
+6. 📎 可点击的报告文件链接（HTML底部）
 
-1. CDP Mode: Uses Chrome DevTools Protocol for better anti-detection (`config.ENABLE_CDP_MODE`)
-2. Login State Caching: Browser context persisted in `browser_data/` directory
-3. Async/Await: Core crawler logic uses asyncio throughout
-4. Pre-commit: File header copyright checker in `tools/file_header_manager.py`
+## 本地开发命令
 
-## File Header Requirement
+```bash
+# 安装依赖
+uv sync
 
-All Python files must include the copyright header. Use `tools/file_header_manager.py` to check/add headers.
+# 安装浏览器驱动
+uv run playwright install
+
+# 启动 MCP 服务器
+uv run python mcp_server.py
+
+# 运行测试
+uv run pytest
+```
+
+## 文件说明
+
+- `mcp_server.py` - MCP 服务器主文件，提供 `crawl_media` 接口
+- `report_generator.py` - 报告生成器（含情感分析），生成 HTML 舆情报告
+- `mcp_adapter.py` - 爬虫适配器
+
+## 技能文件
+
+项目包含 Claude Code Skill：`.claude/skills/media-crawl-analyze.json`
+
+触发关键词：爬取、舆情分析、热度分析、趋势报告等

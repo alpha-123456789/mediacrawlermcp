@@ -115,8 +115,8 @@ uv run playwright install chromium
 
 | 工具名 | 功能 |
 |--------|------|
-| `crawl_media` | 爬取平台内容 |
-| `get_platforms` | 获取支持的的平台列表 |
+| `crawl_media` | 爬取平台内容并生成舆情分析报告 |
+| `get_platforms` | 获取支持的平台列表 |
 | `get_crawler_types` | 获取支持的爬取类型 |
 
 ### crawl_media 参数
@@ -128,6 +128,56 @@ uv run playwright install chromium
 - `is_get_comments`: 是否获取评论（默认false）
 - `is_get_sub_comments`: 是否获取子评论（默认false）
 - `max_comments_count`: 评论数量（0-50，默认5）
+- `report_mode`: 报告模式，`ai`(默认) 或 `script`
+- `output_path`: 报告输出目录（默认reports）
+
+### 报告生成
+
+爬取完成后自动生成舆情分析报告：
+
+| 模式 | 说明 | 适用场景 |
+|------|------|----------|
+| `ai`(默认) | Claude 根据数据特征动态设计独特的报告风格 | 需要灵活、个性化的分析 |
+| `script` | 使用预设模板生成统一格式报告 | 需要固定格式、批量对比 |
+
+**AI 模式返回示例：**
+
+```json
+{
+  "status": "success",
+  "platform": "bili",
+  "report_mode": "ai",
+  "prompt": "给 AI 的完整提示词，包含数据特征...",
+  "data_profile": { "数据画像、统计信息..." },
+  "message": "AI 报告数据已生成"
+}
+```
+
+**脚本模式返回示例：**
+
+```json
+{
+  "status": "success",
+  "platform": "bili",
+  "report_mode": "script",
+  "report_path": "reports/B站_关键词_脚本报告_xxx.html",
+  "summary": "控制台可读的舆情分析摘要",
+  "html_content": "完整的HTML报告内容"
+}
+```
+
+### 使用示例
+
+```python
+# 默认 AI 生成报告（推荐）
+搜索小红书上关于"完美日记"的帖子，分析舆情
+
+# 脚本模式生成静态报告
+用脚本模式爬取B站"宝宝巴士"的评论数据
+
+# 指定输出目录
+将分析报告保存到 output/brand 目录
+```
 
 ## 📁 项目结构
 
@@ -135,9 +185,12 @@ uv run playwright install chromium
 .
 ├── mcp_server.py        # MCP 服务入口
 ├── mcp_adapter.py       # 爬虫适配器
+├── report_generator.py  # 舆情分析报告生成器
+├── ai_report_generator.py # AI 报告提示词生成器
 ├── media_platform/      # 各平台爬虫实现
 ├── config/             # 配置文件
 ├── store/              # 数据存储
+├── reports/            # 生成的报告输出目录
 └── pyproject.toml      # 项目依赖
 ```
 

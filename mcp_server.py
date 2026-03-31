@@ -53,6 +53,13 @@ class CrawlerType(str, Enum):
     CREATOR = "creator"   # 创作者主页
 
 
+class ReportType(str, Enum):
+    """报告类型枚举"""
+    SENTIMENT = "sentiment"      # 舆情分析报告
+    TREND = "trend"              # 热门趋势报告
+    COMPARISON = "comparison"    # 竞品对比报告
+
+
 # =========================
 # 数据模型
 # =========================
@@ -544,6 +551,8 @@ async def crawl_media(
     max_comments_count: int = 20,
     save_data_option: str = "",
     output_path: str = "reports",
+    report_type: str = "sentiment",
+    report_mode: str = "ai",
 ) -> str:
     """
     爬取社交媒体平台帖子、评论数据，并生成舆情分析报告
@@ -567,6 +576,8 @@ async def crawl_media(
         max_comments_count: 返回帖子下评论数量以及每个评论的子评论的数量，默认20，范围0-50
         save_data_option: 数据存储方式，可选值: ""(不存储), "db"(存储到数据库)，默认""
         output_path: 报告保存目录，默认"reports"
+        report_type: 报告类型，可选值: sentiment(舆情分析), trend(热门趋势), comparison(竞品对比)，默认"sentiment"
+        report_mode: 报告生成方式，可选值: "ai"(AI智能生成，高质量动态报告，默认)，"script"(脚本自动生成，静态模板)。当用户要求用脚本、静态生成、固定格式时使用"script"
 
     Returns:
         JSON格式的报告结果，包含报告文件路径和分析摘要
@@ -576,7 +587,7 @@ async def crawl_media(
             "status": "success",
             "platform": "xhs",
             "keywords": "Python编程",
-            "report_path": "reports/小红书_Python编程_趋势报告_20250330_143000.html",
+            "report_path": "reports/小红书_Python编程_舆情分析报告_20250330_143000.html",
             "summary": "...",
             "message": "舆情分析报告已生成"
         }
@@ -639,36 +650,64 @@ async def crawl_media(
         try:
             platform_name = PLATFORM_NAMES.get(platform, platform)
 
-            # 生成并保存报告到 MCP 项目目录
-            report_path, summary, html_content = generate_report(
-                platform=platform,
-                keywords=keywords,
-                data=items,
-                output_path="reports"
-            )
+            # 根据报告模式选择生成方式
+            if report_mode == "ai":
+                # AI 驱动报告 - 返回提示词供 AI 生成
+                from ai_report_generator import generate_ai_report_data
 
-            # 转换为绝对路径，便于点击访问
-            abs_path = os.path.abspath(report_path)
+                result = generate_ai_report_data(platform, keywords, items)
 
-            # 返回报告信息
-            return json.dumps(
-                {
-                    "status": "success",
-                    "platform": platform,
-                    "platform_name": platform_name,
-                    "crawler_type": crawler_type,
-                    "keywords": keywords,
-                    "is_get_comments": is_get_comments,
-                    "is_get_sub_comments": is_get_sub_comments,
-                    "max_comments_count": max_comments_count,
-                    "report_path": abs_path,  # 绝对路径，可点击打开
-                    "relative_path": report_path,
-                    "summary": summary,
-                    "html_content": html_content,
-                    "message": f"舆情分析报告已生成: {abs_path}"
-                },
-                ensure_ascii=False,
-            )
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "platform": platform,
+                        "platform_name": platform_name,
+                        "crawler_type": crawler_type,
+                        "keywords": keywords,
+                        "report_mode": "ai",
+                        "is_get_comments": is_get_comments,
+                        "is_get_sub_comments": is_get_sub_comments,
+                        "max_comments_count": max_comments_count,
+                        "prompt": result["prompt"],
+                        "data_profile": result["profile"],
+                        "message": "AI 报告数据已生成，请将 prompt 传递给 AI 生成报告",
+                        "note": "使用 AI 生成的报告更加智能、美观，支持动态布局设计"
+                    },
+                    ensure_ascii=False,
+                )
+            else:
+                # 脚本自动生成报告
+                report_path, summary, html_content = generate_report(
+                    platform=platform,
+                    keywords=keywords,
+                    data=items,
+                    output_path="reports",
+                    report_type=report_type
+                )
+
+                # 转换为绝对路径，便于点击访问
+                abs_path = os.path.abspath(report_path)
+
+                # 返回报告信息
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "platform": platform,
+                        "platform_name": platform_name,
+                        "crawler_type": crawler_type,
+                        "keywords": keywords,
+                        "report_mode": "script",
+                        "is_get_comments": is_get_comments,
+                        "is_get_sub_comments": is_get_sub_comments,
+                        "max_comments_count": max_comments_count,
+                        "report_path": abs_path,  # 绝对路径，可点击打开
+                        "relative_path": report_path,
+                        "summary": summary,
+                        "html_content": html_content,
+                        "message": f"舆情分析报告已生成: {abs_path}"
+                    },
+                    ensure_ascii=False,
+                )
         except Exception as e:
             # 如果生成报告失败，回退到返回原始数据
             result = CrawlResult(

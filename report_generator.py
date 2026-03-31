@@ -73,10 +73,13 @@ class SentimentAnalyzer:
 
 
 class DataAnalyzer:
-    """数据特征分析器"""
+    """数据特征分析器 - 使用自动字段识别"""
 
     def __init__(self, data: List[Dict]):
         self.data = data
+        from auto_field_detector import AutoFieldDetector
+        self.detector = AutoFieldDetector()
+        self.field_map = self.detector.detect_from_data_list(data)
 
     def detect_features(self) -> Dict[str, bool]:
         """检测数据包含哪些特征"""
@@ -84,65 +87,25 @@ class DataAnalyzer:
             return {}
 
         first_item = self.data[0]
-        interact = first_item.get('interact_info', {})
 
         features = {
-            'has_likes': False,
-            'has_comments': False,
-            'has_shares': False,
-            'has_views': False,
-            'has_collects': False,
-            'has_coins': False,
+            'has_likes': 'likes' in self.field_map,
+            'has_comments': 'comments' in self.field_map,
+            'has_shares': 'shares' in self.field_map,
+            'has_views': 'views' in self.field_map,
+            'has_collects': 'favorites' in self.field_map,
+            'has_coins': 'coins' in self.field_map,
             'has_comment_data': False,
             'has_author_info': False,
             'has_time_info': False,
             'has_content_text': False,
         }
 
-        # 检测互动数据
-        like_fields = ['like_count', 'digg_count', 'attitudes_count', 'praise_count', 'thumb_count']
-        for field in like_fields:
-            if field in interact and interact[field]:
-                features['has_likes'] = True
-                break
-
-        # 检测评论数
-        comment_fields = ['comment_count', 'comments_count', 'reply_count']
-        for field in comment_fields:
-            if field in interact and interact[field]:
-                features['has_comments'] = True
-                break
-
         # 检测实际评论内容
         for item in self.data:
             if item.get('comments') and len(item['comments']) > 0:
                 features['has_comment_data'] = True
                 break
-
-        # 检测分享/转发
-        share_fields = ['share_count', 'reposts_count', 'forward_count']
-        for field in share_fields:
-            if field in interact and interact[field]:
-                features['has_shares'] = True
-                break
-
-        # 检测播放量/阅读量
-        view_fields = ['view_count', 'play_count', 'read_count', 'page_views']
-        for field in view_fields:
-            if field in interact and interact[field]:
-                features['has_views'] = True
-                break
-
-        # 检测收藏
-        collect_fields = ['collect_count', 'favorite_count', 'save_count']
-        for field in collect_fields:
-            if field in interact and interact[field]:
-                features['has_collects'] = True
-                break
-
-        # 检测投币（B站特色）
-        if 'coin_count' in interact or 'coins' in interact:
-            features['has_coins'] = True
 
         # 检测作者信息
         if first_item.get('nickname') or first_item.get('author'):
@@ -153,10 +116,15 @@ class DataAnalyzer:
             features['has_time_info'] = True
 
         # 检测内容文本
-        if first_item.get('desc') or first_item.get('title') or first_item.get('content_text'):
+        if first_item.get('desc') or first_item.get('title') or first_item.get('content_text') or first_item.get('caption'):
             features['has_content_text'] = True
 
         return features
+
+    def _get_standardized_value(self, item: Dict, standard_field: str) -> int:
+        """使用自动识别的字段映射获取值"""
+        from auto_field_detector import get_standardized_value
+        return get_standardized_value(item, self.field_map, standard_field)
 
     def get_data_profile(self) -> Dict:
         """获取数据画像"""
@@ -170,27 +138,11 @@ class DataAnalyzer:
         total_collects = 0
 
         for item in self.data:
-            interact = item.get('interact_info', {})
-
-            # 点赞
-            likes = interact.get('like_count', 0) or interact.get('digg_count', 0) or interact.get('attitudes_count', 0) or 0
-            total_likes += likes
-
-            # 评论
-            comments = interact.get('comment_count', 0) or interact.get('comments_count', 0) or 0
-            total_comments += comments
-
-            # 分享
-            shares = interact.get('share_count', 0) or interact.get('reposts_count', 0) or 0
-            total_shares += shares
-
-            # 播放/阅读
-            views = interact.get('view_count', 0) or interact.get('play_count', 0) or 0
-            total_views += views
-
-            # 收藏
-            collects = interact.get('collect_count', 0) or interact.get('favorite_count', 0) or 0
-            total_collects += collects
+            total_likes += self._get_standardized_value(item, 'likes')
+            total_comments += self._get_standardized_value(item, 'comments')
+            total_shares += self._get_standardized_value(item, 'shares')
+            total_views += self._get_standardized_value(item, 'views')
+            total_collects += self._get_standardized_value(item, 'favorites')
 
         count = len(self.data) if self.data else 1
 

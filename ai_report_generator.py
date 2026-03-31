@@ -2,6 +2,7 @@
 """
 AI 驱动报告生成器 v4.0
 将数据特征传递给 AI，由 AI 动态生成报告结构
+支持自动字段识别，无需手动配置平台字段映射
 """
 
 import os
@@ -10,12 +11,17 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Tuple, Optional
 
+from auto_field_detector import AutoFieldDetector, get_standardized_value
+
 
 class DataProfiler:
-    """数据特征分析器 - 为 AI 提供数据画像"""
+    """数据特征分析器 - 使用自动字段识别，无需硬编码平台映射"""
 
     def __init__(self, data: List[Dict]):
         self.data = data
+        # 自动识别字段映射
+        self.detector = AutoFieldDetector()
+        self.field_map = self.detector.detect_from_data_list(data)
 
     def analyze(self) -> Dict:
         """生成完整的数据画像"""
@@ -24,9 +30,8 @@ class DataProfiler:
 
         # 基础统计
         total_items = len(self.data)
-        first_item = self.data[0]
 
-        # 分析数据结构
+        # 分析数据结构（使用自动识别的映射）
         fields_found = self._detect_fields()
 
         # 数值统计
@@ -44,37 +49,42 @@ class DataProfiler:
             "数值统计": numeric_stats,
             "内容特征": content_analysis,
             "互动模式": engagement_pattern,
-            "样例数据": self._get_samples()
+            "样例数据": self._get_samples(),
+            "_field_map": self.field_map  # 内部使用，用于调试
         }
 
     def _detect_fields(self) -> Dict[str, bool]:
-        """检测数据中包含哪些字段"""
-        sample = self.data[0] if self.data else {}
-        interact = sample.get('interact_info', {}) if isinstance(sample, dict) else {}
-
+        """检测数据中包含哪些字段（基于自动识别的映射）"""
+        # 使用自动识别的字段映射来判断
         return {
-            "点赞": any(k in interact for k in ['like_count', 'digg_count', 'attitudes_count']),
-            "评论数": any(k in interact for k in ['comment_count', 'comments_count']),
+            "点赞": "likes" in self.field_map,
+            "评论数": "comments" in self.field_map,
             "评论内容": any(item.get('comments') for item in self.data[:5]),
-            "播放/阅读": any(k in interact for k in ['view_count', 'play_count', 'read_count']),
-            "分享/转发": any(k in interact for k in ['share_count', 'reposts_count']),
-            "收藏": any(k in interact for k in ['collect_count', 'favorite_count']),
-            "投币": 'coin_count' in interact or 'coins' in interact,
-            "标题": any(item.get('title') or item.get('desc') for item in self.data[:3]),
-            "作者": any(item.get('nickname') or item.get('author') for item in self.data[:3]),
-            "时间": any(item.get('create_time') or item.get('created_at') for item in self.data[:3])
+            "播放/阅读": "views" in self.field_map,
+            "分享/转发": "shares" in self.field_map,
+            "收藏": "favorites" in self.field_map,
+            "投币": "coins" in self.field_map,
+            "标题": any(item.get('title') or item.get('desc') or item.get('caption')
+                      for item in self.data[:3]),
+            "作者": any(item.get('nickname') or item.get('author')
+                      for item in self.data[:3]),
+            "时间": any(item.get('create_time') or item.get('created_at')
+                      for item in self.data[:3])
         }
+
+    def _get_standardized_value(self, item: Dict, standard_field: str) -> int:
+        """获取标准化字段值"""
+        return get_standardized_value(item, self.field_map, standard_field)
 
     def _calculate_stats(self) -> Dict:
         """计算数值统计"""
         stats = {"likes": 0, "comments": 0, "views": 0, "shares": 0}
 
         for item in self.data:
-            interact = item.get('interact_info', {}) if isinstance(item, dict) else {}
-            stats["likes"] += interact.get('like_count', 0) or interact.get('digg_count', 0) or 0
-            stats["comments"] += interact.get('comment_count', 0) or interact.get('comments_count', 0) or 0
-            stats["views"] += interact.get('view_count', 0) or interact.get('play_count', 0) or 0
-            stats["shares"] += interact.get('share_count', 0) or interact.get('reposts_count', 0) or 0
+            stats["likes"] += self._get_standardized_value(item, "likes")
+            stats["comments"] += self._get_standardized_value(item, "comments")
+            stats["views"] += self._get_standardized_value(item, "views")
+            stats["shares"] += self._get_standardized_value(item, "shares")
 
         total = len(self.data)
         return {
@@ -89,7 +99,6 @@ class DataProfiler:
         # 检查评论内容长度分布
         comment_lengths = []
         has_purchase_intent = 0
-        sentiment_keywords = {"positive": ["好", "喜欢", "棒", "赞"], "negative": ["差", "烂", "坑", "失望"]}
 
         for item in self.data:
             comments = item.get('comments', [])
@@ -108,13 +117,14 @@ class DataProfiler:
 
     def _analyze_engagement(self) -> str:
         """分析互动模式"""
-        interact = self.data[0].get('interact_info', {}) if self.data and isinstance(self.data[0], dict) else {}
-
-        if 'view_count' in interact or 'play_count' in interact:
+        # 视频观看型：有播放量数据
+        if "views" in self.field_map:
             return "视频观看型：重点是播放量、完播率、弹幕互动"
-        elif 'attitudes_count' in interact or 'reposts_count' in interact:
+        # 社交传播型：有转发数据
+        elif "shares" in self.field_map:
             return "社交传播型：重点是转发、点赞、讨论热度"
-        elif 'comment_count' in interact or interact.get('comments'):
+        # 内容讨论型：有评论数据
+        elif "comments" in self.field_map or any(item.get('comments') for item in self.data[:3]):
             return "内容讨论型：重点是评论质量、用户反馈"
         else:
             return "基础展示型：重点是内容曝光、用户触达"
@@ -123,7 +133,7 @@ class DataProfiler:
         """检测内容类型"""
         sample_text = ""
         for item in self.data[:3]:
-            sample_text += item.get('desc', '') or item.get('title', '') or ''
+            sample_text += item.get('desc', '') or item.get('title', '') or item.get('caption', '')
 
         if any(kw in sample_text for kw in ['教程', '攻略', '步骤', '方法']):
             return "教学/教程内容"
@@ -140,10 +150,9 @@ class DataProfiler:
         max_values = {"likes": 0, "comments": 0, "views": 0}
 
         for item in self.data:
-            interact = item.get('interact_info', {}) if isinstance(item, dict) else {}
-            max_values["likes"] = max(max_values["likes"], interact.get('like_count', 0) or interact.get('digg_count', 0) or 0)
-            max_values["comments"] = max(max_values["comments"], interact.get('comment_count', 0) or 0)
-            max_values["views"] = max(max_values["views"], interact.get('view_count', 0) or interact.get('play_count', 0) or 0)
+            max_values["likes"] = max(max_values["likes"], self._get_standardized_value(item, "likes"))
+            max_values["comments"] = max(max_values["comments"], self._get_standardized_value(item, "comments"))
+            max_values["views"] = max(max_values["views"], self._get_standardized_value(item, "views"))
 
         return max_values
 
@@ -152,10 +161,17 @@ class DataProfiler:
         samples = []
         for item in self.data[:3]:
             if isinstance(item, dict):
+                interact = item.get('interact_info', {})
+                # 显示自动识别的映射关系
+                mapped = {}
+                for std_field, actual_field in self.field_map.items():
+                    if actual_field in interact:
+                        mapped[std_field] = interact[actual_field]
+
                 samples.append({
-                    "title": (item.get('title') or item.get('desc', ''))[:50],
+                    "title": (item.get('title') or item.get('desc', '') or item.get('caption', ''))[:50],
                     "author": item.get('nickname', item.get('author', '未知')),
-                    "interact": {k: v for k, v in item.get('interact_info', {}).items() if v}
+                    "interact": mapped or {k: v for k, v in interact.items() if v}
                 })
         return samples
 

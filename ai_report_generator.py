@@ -5,11 +5,8 @@ AI 驱动报告生成器 v4.0
 支持自动字段识别，无需手动配置平台字段映射
 """
 
-import os
-import re
 import json
-from datetime import datetime
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List
 
 from auto_field_detector import AutoFieldDetector, get_standardized_value
 
@@ -285,58 +282,3 @@ def generate_ai_report_data(
             "keywords": keywords
         }
     }
-
-
-def save_report(html_content: str, platform: str, keywords: str, output_path: str = "reports") -> str:
-    """保存报告文件"""
-    os.makedirs(output_path, exist_ok=True)
-
-    platform_names = {
-        'xhs': '小红书', 'dy': '抖音', 'ks': '快手', 'bili': 'B站',
-        'wb': '微博', 'tieba': '百度贴吧', 'zhihu': '知乎'
-    }
-    platform_name = platform_names.get(platform, platform)
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = re.sub(r'[\\/*?:"<>|]', "_", f"{platform_name}_{keywords}_AI智能报告_{timestamp}.html")
-    filepath = os.path.join(output_path, filename)
-
-    with open(filepath, 'w', encoding='utf-8') as f:
-        f.write(html_content)
-
-    return filepath
-
-
-# 兼容旧接口
-def generate_report(
-    platform: str,
-    keywords: str,
-    data: List[Dict],
-    output_path: str = "reports",
-    report_type: str = "auto"
-) -> Tuple[str, str, str]:
-    """
-    生成报告 - 返回数据和提示词，供 AI 使用
-    """
-    result = generate_ai_report_data(platform, keywords, data)
-
-    summary = f"""
-╔════════════════════════════════════════════════════════════════╗
-║              🤖 AI 驱动报告数据源已生成                          ║
-╠════════════════════════════════════════════════════════════════╣
-║ 平台: {platform:<12} 关键词: {keywords:<25}      ║
-║ 数据量: {result['data_summary']['count']:<5}                                     ║
-╠════════════════════════════════════════════════════════════════╣
-║ 📊 数据特征                                                      ║
-"""
-    for field, has in result['profile'].get("数据结构", {}).items():
-        if has:
-            summary += f"║    ✓ {field:<15}                                     ║\n"
-
-    summary += f"""╠════════════════════════════════════════════════════════════════╣
-║ 💡 请使用 generate_ai_report_data() 获取完整提示词             ║
-║    或将 prompts 传递给 Claude/AI 生成报告                       ║
-╚════════════════════════════════════════════════════════════════╝"""
-
-    # 提示词作为 html_content 返回（实际使用时 AI 会生成真正的 HTML）
-    return "", summary, result["prompt"]

@@ -12,6 +12,11 @@ import jieba.analyse
 from datetime import datetime
 from typing import Any, Dict, List, Tuple, Optional
 from collections import Counter
+from pathlib import Path
+
+# 默认报告目录（如果调用者未指定）
+PROJECT_ROOT = Path(__file__).parent
+DEFAULT_REPORTS_DIR = PROJECT_ROOT / "reports"
 
 
 class SentimentAnalyzer:

@@ -14,10 +14,15 @@ import asyncio
 from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp_adapter import run_crawl_sync
 from report_generator import generate_report, generate_report_content
+
+# 项目根目录
+PROJECT_ROOT = Path(__file__).parent
+DEFAULT_REPORTS_DIR = PROJECT_ROOT / "reports"
 
 # 平台名称映射
 PLATFORM_NAMES = {
@@ -550,7 +555,7 @@ async def crawl_media(
     is_get_sub_comments: bool = False,
     max_comments_count: int = 20,
     save_data_option: str = "",
-    output_path: str = "reports",
+    output_path: str = None,
     report_type: str = "sentiment",
     report_mode: str = "ai",
 ) -> str:
@@ -575,7 +580,7 @@ async def crawl_media(
         is_get_sub_comments: 是否爬取子评论，默认False
         max_comments_count: 返回帖子下评论数量以及每个评论的子评论的数量，默认20，范围0-50
         save_data_option: 数据存储方式，可选值: ""(不存储), "db"(存储到数据库)，默认""
-        output_path: 报告保存目录，默认"reports"
+        output_path: 报告保存目录，不指定则使用项目根目录下的 reports 文件夹
         report_type: 报告类型，可选值: sentiment(舆情分析), trend(热门趋势), comparison(竞品对比)，默认"sentiment"
         report_mode: 报告生成方式，可选值: "ai"(AI智能生成，高质量动态报告，默认)，"script"(脚本自动生成，静态模板)。当用户要求用脚本、静态生成、固定格式时使用"script"
 
@@ -593,6 +598,11 @@ async def crawl_media(
         }
     """
     try:
+        # 如果未指定输出路径，使用默认报告目录（项目根目录下的 reports）
+        if output_path is None:
+            DEFAULT_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            output_path = str(DEFAULT_REPORTS_DIR)
+
         # 参数验证
         is_valid, error_msg = validate_inputs(
             platform, crawler_type, keywords, max_count, max_comments_count
@@ -657,21 +667,21 @@ async def crawl_media(
 
                 result = generate_ai_report_data(platform, keywords, items)
 
+                # 生成建议文件名
+                safe_kw = "".join(c if c.isalnum() or c in '-_ ' else '_' for c in keywords)
+                safe_kw = safe_kw.strip()
+
                 return json.dumps(
                     {
                         "status": "success",
                         "platform": platform,
                         "platform_name": platform_name,
-                        "crawler_type": crawler_type,
                         "keywords": keywords,
                         "report_mode": "ai",
-                        "is_get_comments": is_get_comments,
-                        "is_get_sub_comments": is_get_sub_comments,
-                        "max_comments_count": max_comments_count,
                         "prompt": result["prompt"],
                         "data_profile": result["profile"],
-                        "message": "AI 报告数据已生成，请将 prompt 传递给 AI 生成报告",
-                        "note": "使用 AI 生成的报告更加智能、美观，支持动态布局设计"
+                        "suggested_filename": f"{platform_name}_{safe_kw}_AI报告.html",
+                        "message": f"请根据 prompt 生成 HTML 报告（设计独特风格），保存到 ./reports/{platform_name}_{safe_kw}_AI报告.html（目录不存在请创建）"
                     },
                     ensure_ascii=False,
                 )
@@ -681,7 +691,7 @@ async def crawl_media(
                     platform=platform,
                     keywords=keywords,
                     data=items,
-                    output_path="reports",
+                    output_path=output_path,
                     report_type=report_type
                 )
 

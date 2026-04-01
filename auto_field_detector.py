@@ -254,7 +254,7 @@ class AutoFieldDetector:
 
         for item in data_list[:10]:  # 分析前10条
             interact = item.get('interact_info', {}) if isinstance(item, dict) else {}
-            if not interact:
+            if not isinstance(interact, dict) or not interact:
                 continue
 
             for key in interact.keys():
@@ -269,7 +269,8 @@ class AutoFieldDetector:
         }
 
         # 使用第一条数据作为样本，但只考虑高频字段
-        sample = data_list[0].get('interact_info', {})
+        raw_sample = data_list[0].get('interact_info', {})
+        sample = raw_sample if isinstance(raw_sample, dict) else {}
         filtered_sample = {k: v for k, v in sample.items() if k in common_fields}
 
         return self.detect(filtered_sample)

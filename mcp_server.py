@@ -8,7 +8,8 @@
 # 提供社交媒体平台数据爬取服务的 MCP 服务器
 # 支持平台：小红书、抖音、快手、B站、微博、贴吧、知乎
 
-import json,os
+import json
+import os
 from datetime import datetime
 import asyncio
 from typing import Any, Dict, List, Optional, Union
@@ -16,9 +17,12 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+# 加载环境变量（从 .env 文件）
+from dotenv import load_dotenv
+load_dotenv()
+
 from mcp.server.fastmcp import FastMCP
 from mcp_adapter import run_crawl_sync
-from report_generator import generate_report, generate_report_content
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent
@@ -180,17 +184,33 @@ def process_bili_data(data: List[Dict]) -> List[Dict]:
             sub_comment_list = []
             replies = comment.get("replies") or []
             for sub_comment in replies:
-                content_obj = sub_comment.get("content", {})
+                raw_content = sub_comment.get("content", {})
+                # content 可能是字典或字符串
+                if isinstance(raw_content, dict):
+                    content_str = raw_content.get("message", "")
+                elif isinstance(raw_content, str):
+                    content_str = raw_content
+                else:
+                    content_str = ""
+
                 sub_comment_list.append({
-                    "content": content_obj.get("message", ""),
+                    "content": content_str,
                     "create_time": sub_comment.get("ctime", ""),
                     "like_count": sub_comment.get("like_count", 0),
                     "sub_comment_nickname": sub_comment.get("member", {}).get("uname", "")
                 })
 
-            comment_content = comment.get("content", {})
+            raw_content = comment.get("content", {})
+            # content 可能是字典或字符串
+            if isinstance(raw_content, dict):
+                comment_content = raw_content.get("message", "")
+            elif isinstance(raw_content, str):
+                comment_content = raw_content
+            else:
+                comment_content = ""
+
             comment_list.append({
-                "content": comment_content.get("message", ""),
+                "content": comment_content,
                 "sub_comment_count": len(sub_comment_list),
                 "like_count": comment.get("like", 0),
                 "comment_nickname": comment.get("member", {}).get("uname", ""),
@@ -436,7 +456,7 @@ def process_ks_data(data: List[Dict]) -> List[Dict]:
     处理快手数据
 
     数据结构特点:
-    - photo: 视频信息
+    - photo: 视频信息（可能是字典或列表）
     - author: 作者信息
     - comments: 评论列表
     """
@@ -445,7 +465,13 @@ def process_ks_data(data: List[Dict]) -> List[Dict]:
 
     items = []
     for post in data:
+        # photo 可能是字典或列表，统一处理为字典
         photo = post.get("photo", {})
+        if isinstance(photo, list):
+            photo = photo[0] if photo else {}
+        if not isinstance(photo, dict):
+            photo = {}
+
         comments = post.get("comments") or []
 
         interact_info = {
@@ -456,11 +482,18 @@ def process_ks_data(data: List[Dict]) -> List[Dict]:
             "realLikeCount": photo.get("realLikeCount", 0)
         }
 
+        # author 可能在 photo 下，也可能在 post 下
+        author_name = ""
+        if photo.get("author"):
+            author_name = photo["author"].get("name", "")
+        elif post.get("author"):
+            author_name = post["author"].get("name", "")
+
         items.append({
             "note_id": photo.get("id", ""),
             "caption": photo.get("caption", ""),
             "originCaption": photo.get("originCaption", ""),
-            "nickname": photo.get("author", {}).get("name", ""),
+            "nickname": author_name,
             "interact_info": interact_info,
             "comments": comments
         })
@@ -557,7 +590,6 @@ async def crawl_media(
     save_data_option: str = "",
     output_path: str = None,
     report_type: str = "sentiment",
-    report_mode: str = "ai",
 ) -> str:
     """
     爬取社交媒体平台帖子、评论数据，并生成舆情分析报告
@@ -581,8 +613,12 @@ async def crawl_media(
         max_comments_count: 返回帖子下评论数量以及每个评论的子评论的数量，默认20，范围0-50
         save_data_option: 数据存储方式，可选值: ""(不存储), "db"(存储到数据库)，默认""
         output_path: 报告保存目录，不指定则使用项目根目录下的 reports 文件夹
-        report_type: 报告类型，可选值: sentiment(舆情分析), trend(热门趋势), comparison(竞品对比)，默认"sentiment"
-        report_mode: 报告生成方式，可选值: "ai"(AI智能生成，高质量动态报告，默认)，"script"(脚本自动生成，静态模板)。当用户要求用脚本、静态生成、固定格式时使用"script"
+        report_type: 报告类型，可选值: "sentiment"(情感分析), "trend"(热门趋势), "hot_topics"(热门话题), "keyword"(关键词分析), "volume"(声量分析), "viral_spread"(传播分析), "influencer"(影响力账号), "audience"(用户画像), "comparison"(竞品对比), "risk"(舆情风险)，默认"sentiment"
+
+    Note:
+        报告生成会自动检测LLM配置：如果配置了 ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY
+        （或 OPENAI_BASE_URL + OPENAI_API_KEY），将使用AI大模型生成高质量报告；
+        否则使用内置脚本生成标准报告。
 
     Returns:
         JSON格式的报告结果，包含报告文件路径和分析摘要
@@ -660,33 +696,74 @@ async def crawl_media(
         try:
             platform_name = PLATFORM_NAMES.get(platform, platform)
 
-            # 根据报告模式选择生成方式
-            if report_mode == "ai":
-                # AI 驱动报告 - 返回提示词供 AI 生成
+            # 检查是否配置了 AI API
+            ai_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")
+            ai_base_url = os.getenv("ANTHROPIC_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+            has_ai_config = bool(ai_api_key and ai_base_url)
+
+            # 根据配置选择生成方式
+            if has_ai_config:
+                # AI 增强报告生成
                 from ai_report_generator import generate_ai_report_data
+                from llm_report_generator import generate_report_with_llm
 
-                result = generate_ai_report_data(platform, keywords, items)
+                # 1. 准备 AI 报告数据
+                ai_data = generate_ai_report_data(platform, keywords, items)
 
-                # 生成建议文件名
-                safe_kw = "".join(c if c.isalnum() or c in '-_ ' else '_' for c in keywords)
-                safe_kw = safe_kw.strip()
+                # 2. 调用 LLM API 生成报告
+                report_path, summary = await generate_report_with_llm(
+                    platform=platform,
+                    keywords=keywords,
+                    ai_data=ai_data,
+                    output_path=output_path
+                )
+
+                abs_path = os.path.abspath(report_path)
+
+                # 准备验证样本（前3条原始数据用于核对真实性）
+                verification_samples = []
+                for item in items[:3]:
+                    sample = {
+                        "title": (item.get('title') or item.get('desc', '') or item.get('caption', ''))[:100],
+                        "author": item.get('nickname', item.get('author', '未知')),
+                        "interact_info": item.get('interact_info', {}),
+                        "comment_preview": []
+                    }
+                    # 添加前2条评论作为验证
+                    comments = item.get('comments', [])
+                    for c in comments[:2]:
+                        if isinstance(c, dict):
+                            sample["comment_preview"].append({
+                                "user": c.get('comment_nickname', c.get('user_nickname', '匿名')),
+                                "content": c.get('content', '')[:100] if c.get('content') else '',
+                                "likes": c.get('like_count', 0)
+                            })
+                    verification_samples.append(sample)
 
                 return json.dumps(
                     {
                         "status": "success",
                         "platform": platform,
                         "platform_name": platform_name,
+                        "crawler_type": crawler_type,
                         "keywords": keywords,
-                        "report_mode": "ai",
-                        "prompt": result["prompt"],
-                        "data_profile": result["profile"],
-                        "suggested_filename": f"{platform_name}_{safe_kw}_AI报告.html",
-                        "message": f"请根据 prompt 生成 HTML 报告（设计独特风格），保存到 ./reports/{platform_name}_{safe_kw}_AI报告.html（目录不存在请创建）"
+                        "is_get_comments": is_get_comments,
+                        "is_get_sub_comments": is_get_sub_comments,
+                        "max_comments_count": max_comments_count,
+                        "report_mode": "ai_enhanced",
+                        "has_ai_config": True,
+                        "report_path": abs_path,
+                        "relative_path": report_path,
+                        "summary": summary,
+                        "verification_samples": verification_samples,  # 真实性验证样本
+                        "message": f"AI 增强报告已生成: {abs_path}"
                     },
                     ensure_ascii=False,
                 )
             else:
-                # 脚本自动生成报告
+                # 脚本自动生成报告（标准模式）
+                from report_generator import generate_report
+
                 report_path, summary, html_content = generate_report(
                     platform=platform,
                     keywords=keywords,
@@ -698,6 +775,26 @@ async def crawl_media(
                 # 转换为绝对路径，便于点击访问
                 abs_path = os.path.abspath(report_path)
 
+                # 准备验证样本（前3条原始数据用于核对真实性）
+                verification_samples = []
+                for item in items[:3]:
+                    sample = {
+                        "title": (item.get('title') or item.get('desc', '') or item.get('caption', ''))[:100],
+                        "author": item.get('nickname', item.get('author', '未知')),
+                        "interact_info": item.get('interact_info', {}),
+                        "comment_preview": []
+                    }
+                    # 添加前2条评论作为验证
+                    comments = item.get('comments', [])
+                    for c in comments[:2]:
+                        if isinstance(c, dict):
+                            sample["comment_preview"].append({
+                                "user": c.get('comment_nickname', c.get('user_nickname', '匿名')),
+                                "content": c.get('content', '')[:100] if c.get('content') else '',
+                                "likes": c.get('like_count', 0)
+                            })
+                    verification_samples.append(sample)
+
                 # 返回报告信息
                 return json.dumps(
                     {
@@ -707,19 +804,41 @@ async def crawl_media(
                         "crawler_type": crawler_type,
                         "keywords": keywords,
                         "report_mode": "script",
+                        "has_ai_config": has_ai_config,
                         "is_get_comments": is_get_comments,
                         "is_get_sub_comments": is_get_sub_comments,
                         "max_comments_count": max_comments_count,
                         "report_path": abs_path,  # 绝对路径，可点击打开
                         "relative_path": report_path,
                         "summary": summary,
-                        "html_content": html_content,
-                        "message": f"舆情分析报告已生成: {abs_path}"
+                        "verification_samples": verification_samples,  # 真实性验证样本
+                        "message": f"舆情分析报告已生成: {abs_path}" +
+                                   (" (未使用AI：请先配置 ANTHROPIC_API_KEY 和 ANTHROPIC_BASE_URL 环境变量)" if not has_ai_config else "")
                     },
                     ensure_ascii=False,
                 )
         except Exception as e:
-            # 如果生成报告失败，回退到返回原始数据
+            # 如果生成报告失败，回退到返回原始数据（只返回3条样本）
+            # 准备验证样本（前3条原始数据用于核对真实性）
+            verification_samples = []
+            for item in items[:3]:
+                sample = {
+                    "title": (item.get('title') or item.get('desc', '') or item.get('caption', ''))[:100],
+                    "author": item.get('nickname', item.get('author', '未知')),
+                    "interact_info": item.get('interact_info', {}),
+                    "comment_preview": []
+                }
+                # 添加前2条评论作为验证
+                comments = item.get('comments', [])
+                for c in comments[:2]:
+                    if isinstance(c, dict):
+                        sample["comment_preview"].append({
+                            "user": c.get('comment_nickname', c.get('user_nickname', '匿名')),
+                            "content": c.get('content', '')[:100] if c.get('content') else '',
+                            "likes": c.get('like_count', 0)
+                        })
+                verification_samples.append(sample)
+
             result = CrawlResult(
                 platform=platform,
                 crawler_type=crawler_type,
@@ -729,7 +848,7 @@ async def crawl_media(
                 max_comments_count=max_comments_count,
                 save_data_option=save_data_option,
                 count=len(items),
-                items=items,
+                items=items[:3],  # 只返回前3条
                 status="success"
             )
 
@@ -745,6 +864,8 @@ async def crawl_media(
                     "save_data_option": result.save_data_option,
                     "count": result.count,
                     "items": result.items,
+                    "total_items": len(items),  # 返回实际总数
+                    "verification_samples": verification_samples,
                     "report_error": str(e)
                 },
                 ensure_ascii=False,

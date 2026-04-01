@@ -194,6 +194,20 @@ class SmartReportGenerator:
         'zhihu': '&#128161;', # 💡
     }
 
+    REPORT_TYPE_NAMES = {
+        'sentiment': '舆情分析',
+        'trend': '热门趋势',
+        'hot_topics': '热门话题',
+        'keyword': '关键词分析',
+        'volume': '声量分析',
+        'viral_spread': '传播分析',
+        'influencer': '影响力账号',
+        'audience': '用户画像',
+        'comparison': '竞品对比',
+        'risk': '舆情风险',
+        'auto': '智能分析',
+    }
+
     def __init__(
         self,
         platform: str,
@@ -546,6 +560,166 @@ class SmartReportGenerator:
         html += '</div>'
         return html
 
+    def _generate_comment_analysis(self) -> str:
+        """生成评论深度分析模块"""
+        if not self.features.get('has_comment_data', False):
+            return ''
+
+        # 获取代表性评论用于分析
+        comments = self._get_representative_comments()
+        if not comments:
+            return ''
+
+        # 统计情感分布
+        sentiment_counts = {'positive': 0, 'negative': 0, 'neutral': 0}
+        for comment in comments:
+            sentiment_counts[comment['sentiment']] += 1
+
+        # 分析用户关注点
+        topics = []
+        purchase_intent = self._analyze_purchase_intent()
+
+        # 根据评论内容提取关注点
+        for comment in comments[:10]:
+            content = comment['content']
+            if any(kw in content for kw in ['价格', '多少钱', '贵', '便宜', '性价比']):
+                topics.append('价格关注')
+            if any(kw in content for kw in ['质量', '效果', '好用', '不好用']):
+                topics.append('产品效果')
+            if any(kw in content for kw in ['服务', '客服', '售后']):
+                topics.append('服务态度')
+            if any(kw in content for kw in ['推荐', '种草', '安利']):
+                topics.append('推荐意愿')
+
+        # 统计高频话题
+        topic_counter = Counter(topics)
+        top_topics = topic_counter.most_common(3)
+
+        # 获取正面和负面例子
+        positive_examples = [c for c in comments if c['sentiment'] == 'positive'][:2]
+        negative_examples = [c for c in comments if c['sentiment'] == 'negative'][:2]
+
+        html = '''
+        <div class="section">
+            <div class="section-title">&#128172; 评论深度分析</div>
+            <div style="display: grid; gap: 20px;">
+        '''
+
+        # 用户关注焦点
+        if top_topics:
+            html += '<div style="background: #f8f9fa; padding: 15px; border-radius: 12px;">'
+            html += '<div style="font-weight: 600; color: #333; margin-bottom: 10px;">&#127919; 用户关注焦点</div>'
+            html += '<div style="display: flex; flex-wrap: wrap; gap: 10px;">'
+            theme = self._get_theme()
+            for topic, count in top_topics:
+                html += f'<span style="background: {theme["primary"]}20; color: {theme["primary"]}; padding: 6px 12px; border-radius: 16px; font-size: 0.85em;">{topic} ({count})</span>'
+            html += '</div></div>'
+
+        # 购买意向
+        if purchase_intent['intent_rate'] > 0:
+            html += f'''
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 12px;">
+                <div style="font-weight: 600; color: #333; margin-bottom: 10px;">&#128722; 购买意向分析</div>
+                <p style="color: #666; line-height: 1.6;">
+                    {purchase_intent['intent_count']}条评论显示购买意向，占比{purchase_intent['intent_rate']}%。
+                    用户对产品的购买欲望{'较强' if purchase_intent['intent_rate'] > 20 else '一般' if purchase_intent['intent_rate'] > 10 else '较弱'}。
+                </p>
+            </div>
+            '''
+
+        # 典型正面评价
+        if positive_examples:
+            html += '<div style="background: #f6ffed; padding: 15px; border-radius: 12px; border-left: 4px solid #52c41a;">'
+            html += '<div style="font-weight: 600; color: #52c41a; margin-bottom: 10px;">&#128077; 典型正面评价</div>'
+            for ex in positive_examples:
+                html += f'<p style="color: #555; line-height: 1.6; margin: 5px 0;">"{ex["content"][:100]}..."</p>'
+            html += '</div>'
+
+        # 典型负面评价
+        if negative_examples:
+            html += '<div style="background: #fff2f0; padding: 15px; border-radius: 12px; border-left: 4px solid #f5222d;">'
+            html += '<div style="font-weight: 600; color: #f5222d; margin-bottom: 10px;">&#128078; 典型负面评价</div>'
+            for ex in negative_examples:
+                html += f'<p style="color: #555; line-height: 1.6; margin: 5px 0;">"{ex["content"][:100]}..."</p>'
+            html += '</div>'
+        else:
+            html += '<div style="background: #f8f9fa; padding: 15px; border-radius: 12px;">'
+            html += '<div style="font-weight: 600; color: #333; margin-bottom: 10px;">&#128078; 典型负面评价</div>'
+            html += '<p style="color: #888;">未发现明显负面评价</p>'
+            html += '</div>'
+
+        html += '</div></div>'
+        return html
+
+    def _generate_action_plan(self) -> str:
+        """生成处理建议与行动方案"""
+        if not self.features.get('has_comment_data', False):
+            return ''
+
+        sentiment_pct = self._analyze_sentiment()
+        purchase = self._analyze_purchase_intent()
+
+        # 根据数据生成建议
+        suggestions = []
+
+        # 情感分析建议
+        if sentiment_pct.get('positive', 0) > 60:
+            suggestions.append({
+                'category': '营销方向',
+                'icon': '&#128640;',
+                'content': '正面评价占比高，建议将好评内容作为营销素材进行二次传播，增强品牌口碑效应。'
+            })
+        elif sentiment_pct.get('negative', 0) > 30:
+            suggestions.append({
+                'category': '紧急处理',
+                'icon': '&#9888;&#65039;',
+                'content': '负面评价较多，建议及时回应负面评论，了解具体问题并给出解决方案。'
+            })
+
+        # 购买意向建议
+        if purchase['intent_rate'] > 20:
+            suggestions.append({
+                'category': '转化优化',
+                'icon': '&#128722;',
+                'content': f"购买意向率达{purchase['intent_rate']}%，建议加强购买链路引导，设置专属优惠码促进转化。"
+            })
+
+        # 内容策略建议
+        if self.profile['averages'].get('likes', 0) > 1000:
+            suggestions.append({
+                'category': '内容策略',
+                'icon': '&#128161;',
+                'content': '高互动内容表现良好，建议持续产出同类型高质量内容，保持用户活跃度。'
+            })
+
+        if not suggestions:
+            suggestions.append({
+                'category': '数据收集',
+                'icon': '&#128200;',
+                'content': '建议增加数据采集量，覆盖更多用户反馈，以便进行更全面的舆情分析。'
+            })
+
+        html = '''
+        <div class="section">
+            <div class="section-title">&#128221; 处理建议与行动方案</div>
+            <div style="display: grid; gap: 15px;">
+        '''
+
+        theme = self._get_theme()
+        for s in suggestions:
+            html += f'''
+            <div style="display: flex; gap: 15px; align-items: flex-start; background: #f8f9fa; padding: 15px; border-radius: 12px;">
+                <div style="font-size: 1.5em;">{s['icon']}</div>
+                <div>
+                    <div style="font-weight: 600; color: {theme['primary']}; margin-bottom: 5px;">{s['category']}</div>
+                    <div style="color: #555; line-height: 1.6;">{s['content']}</div>
+                </div>
+            </div>
+            '''
+
+        html += '</div></div>'
+        return html
+
     def _generate_comments_section(self) -> str:
         """生成评论区域（如果有评论数据）"""
         if not self.features.get('has_comment_data', False):
@@ -590,6 +764,55 @@ class SmartReportGenerator:
         html += '</div></div>'
         return html
 
+    def _generate_executive_summary(self) -> str:
+        """生成执行摘要"""
+        profile = self.profile
+        features = self.features
+
+        # 核心发现
+        if features.get('has_comment_data'):
+            sentiment_pct = self._analyze_sentiment()
+            positive = sentiment_pct.get('positive', 0)
+            negative = sentiment_pct.get('negative', 0)
+
+            if positive > 60:
+                core_finding = f"整体口碑良好，正面评价占比 {positive:.0f}%"
+            elif negative > 30:
+                core_finding = f"存在舆情风险，负面评价占比 {negative:.0f}%，建议关注"
+            else:
+                core_finding = "舆论分布较为均衡，需结合具体场景分析"
+        else:
+            core_finding = f"共分析 {profile['count']} 条内容"
+
+        # 关键指标
+        highlights = []
+        if features.get('has_likes') and profile['totals']['likes'] > 0:
+            highlights.append(f"总点赞 {self._format_number(profile['totals']['likes'])}")
+        if features.get('has_views') and profile['totals']['views'] > 0:
+            highlights.append(f"总播放 {self._format_number(profile['totals']['views'])}")
+        if features.get('has_comments') and profile['totals']['comments'] > 0:
+            highlights.append(f"总评论 {self._format_number(profile['totals']['comments'])}")
+
+        # 风险提示
+        risk_alert = ""
+        if features.get('has_comment_data'):
+            sentiment_pct = self._analyze_sentiment()
+            if sentiment_pct.get('negative', 0) > 30:
+                risk_alert = f"<div style='color: #f5222d; margin-top: 10px; font-weight: bold;'>&#9888; 负面评价占比 {sentiment_pct['negative']:.0f}%，建议及时处理</div>"
+
+        return f'''
+        <div class="section" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+            <div class="section-title" style="color: white; border-left-color: white;">&#128188; 执行摘要</div>
+            <div style="font-size: 1.1em; margin-bottom: 15px;">
+                <strong>核心发现：</strong>{core_finding}
+            </div>
+            <div style="margin-bottom: 10px;">
+                <strong>关键指标：</strong>{' | '.join(highlights) if highlights else '暂无'}
+            </div>
+            {risk_alert}
+        </div>
+        '''
+
     def _generate_sentiment_chart(self) -> str:
         """生成情感分析图表（如果有评论数据）"""
         if not self.features.get('has_comment_data', False):
@@ -597,10 +820,22 @@ class SmartReportGenerator:
 
         sentiment_pct = self._analyze_sentiment()
 
+        # 生成情感分析文字说明
+        analysis_text = ""
+        if sentiment_pct.get('positive', 0) > sentiment_pct.get('negative', 0):
+            analysis_text = "整体情绪偏正面，用户满意度较高"
+        elif sentiment_pct.get('negative', 0) > 30:
+            analysis_text = "负面情绪占比较高，建议关注用户核心诉求"
+        else:
+            analysis_text = "情绪分布较为中性，需具体分析用户关注点"
+
         return f'''
         <div class="section">
             <div class="section-title">&#128200; 情感分析分布</div>
-            <div class="chart-container" id="sentimentChart" style="height: 300px;"></div>
+            <div class="chart-container" id="sentimentChart" style="height: 280px;"></div>
+            <div style="text-align: center; color: #666; margin-top: 10px; font-size: 0.9em;">
+                {analysis_text}
+            </div>
             <script>
                 var chart = echarts.init(document.getElementById('sentimentChart'));
                 chart.setOption({{
@@ -609,11 +844,15 @@ class SmartReportGenerator:
                     series: [{{
                         type: 'pie',
                         radius: ['40%', '70%'],
+                        center: ['50%', '45%'],
                         data: [
-                            {{ value: {sentiment_pct.get('positive', 0)}, name: '正向', itemStyle: {{ color: '#52c41a' }} }},
+                            {{ value: {sentiment_pct.get('positive', 0)}, name: '正面', itemStyle: {{ color: '#52c41a' }} }},
                             {{ value: {sentiment_pct.get('neutral', 0)}, name: '中性', itemStyle: {{ color: '#faad14' }} }},
-                            {{ value: {sentiment_pct.get('negative', 0)}, name: '负向', itemStyle: {{ color: '#f5222d' }} }}
-                        ]
+                            {{ value: {sentiment_pct.get('negative', 0)}, name: '负面', itemStyle: {{ color: '#f5222d' }} }}
+                        ],
+                        label: {{
+                            formatter: '{{b}}<br/>{{c}}%'
+                        }}
                     }}]
                 }});
             </script>
@@ -653,12 +892,16 @@ class SmartReportGenerator:
     def generate_html(self) -> str:
         """生成完整HTML报告"""
         platform_name = self.PLATFORM_NAMES.get(self.platform, self.platform)
+        report_type_name = self.REPORT_TYPE_NAMES.get(self.report_type, '分析')
         platform_icon = self.PLATFORM_ICONS.get(self.platform, '&#128240;')
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         theme = self._get_theme()
 
         # 根据数据特征决定包含哪些模块
+        executive_summary = self._generate_executive_summary()
         sentiment_section = self._generate_sentiment_chart() if self.features.get('has_comment_data') else ''
+        comment_analysis_section = self._generate_comment_analysis() if self.features.get('has_comment_data') else ''
+        action_plan_section = self._generate_action_plan()
         comments_section = self._generate_comments_section() if self.features.get('has_comment_data') else ''
         content_list_section = f'''
         <div class="section">
@@ -672,7 +915,7 @@ class SmartReportGenerator:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{platform_name}_{self.keywords}_分析报告</title>
+    <title>{platform_name}_{self.keywords}_{report_type_name}报告</title>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -878,30 +1121,45 @@ class SmartReportGenerator:
 <body>
     <div class="container">
         <header class="header">
-            <h1>{platform_name} 数据分析报告</h1>
+            <h1>{platform_name} {report_type_name}报告</h1>
             <p class="subtitle">关键词：「{self.keywords}」</p>
             <p class="meta">{platform_icon} {platform_name} | 生成时间：{timestamp} | 分析样本：{len(self.data)}条</p>
         </header>
 
+        <!-- 1. 执行摘要 -->
+        {executive_summary}
+
+        <!-- 2. 核心数据概览 -->
         <div class="section">
             <div class="section-title">&#128202; 核心数据概览</div>
             {self._generate_metric_cards()}
         </div>
 
+        <!-- 3. 情感分析可视化 -->
         {sentiment_section}
 
+        <!-- 4. 热门内容排行 -->
         {content_list_section}
 
+        <!-- 5. 热词综合分析 -->
         <div class="section">
             <div class="section-title">&#9731; 热门讨论词云</div>
             {self._generate_hot_words()}
         </div>
 
+        <!-- 6. 评论深度分析 -->
+        {comment_analysis_section}
+
+        <!-- 7. 舆情洞察与建议 -->
         <div class="section">
-            <div class="section-title">&#128161; 核心洞察</div>
+            <div class="section-title">&#128161; 舆情洞察与建议</div>
             {self._generate_insights()}
         </div>
 
+        <!-- 8. 处理建议与行动方案 -->
+        {action_plan_section}
+
+        <!-- 9. 代表性用户评论 -->
         {comments_section}
 
         <footer class="footer">
@@ -917,8 +1175,10 @@ class SmartReportGenerator:
         os.makedirs(self.output_path, exist_ok=True)
 
         platform_name = self.PLATFORM_NAMES.get(self.platform, self.platform)
+        report_type_name = self.REPORT_TYPE_NAMES.get(self.report_type, '分析报告')
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = re.sub(r'[\\/*?:"<>|]', "_", f"{platform_name}_{self.keywords}_报告_{timestamp}.html")
+        safe_keyword = re.sub(r'[\\/*?:"<>|]', "_", self.keywords)[:30]  # 限制关键词长度
+        filename = re.sub(r'[\\/*?:"<>|]', "_", f"{platform_name}_{safe_keyword}_{report_type_name}_{timestamp}.html")
         filepath = os.path.join(self.output_path, filename)
 
         html_content = self.generate_html()
@@ -993,16 +1253,16 @@ def generate_report(
     """
     os.makedirs(output_path, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = re.sub(r'[\\/*?:"<>|]', "_", f"{platform}_{keywords}_脚本报告_{timestamp}.html")
-    report_path = os.path.join(output_path, filename)
-    abs_path = os.path.abspath(report_path)
+    # 临时报告路径，实际文件名由 SmartReportGenerator.save_report() 根据 report_type 生成
+    temp_report_path = os.path.join(output_path, "temp.html")
+    abs_temp_path = os.path.abspath(temp_report_path)
 
-    generator = SmartReportGenerator(platform, keywords, data, output_path, abs_path, report_type)
+    generator = SmartReportGenerator(platform, keywords, data, output_path, abs_temp_path, report_type)
     html_content = generator.generate_html()
 
-    with open(report_path, 'w', encoding='utf-8') as f:
-        f.write(html_content)
+    # 使用 save_report 生成正确文件名的报告
+    report_path = generator.save_report()
+    abs_path = os.path.abspath(report_path)
 
     summary = generator.get_console_summary()
     return abs_path, summary, html_content

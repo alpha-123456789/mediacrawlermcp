@@ -344,7 +344,8 @@ class DataProfiler:
 
         full_text = ' '.join(all_text)
         keywords = jieba.analyse.extract_tags(full_text, topK=20, withWeight=True)
-        return [(word, int(weight * 1000)) for word, weight in keywords]
+        # 返回对象数组格式，便于 ECharts 直接使用
+        return [{"name": word, "value": int(weight * 1000)} for word, weight in keywords]
 
     def get_detailed_data(self) -> Dict:
         """获取详细的真实数据，用于 AI 生成报告"""
@@ -408,11 +409,13 @@ class DataProfiler:
 
         total = sum(sentiment_stats.values())
         if total > 0:
-            sentiment_distribution = {
-                k: round(v / total * 100, 1) for k, v in sentiment_stats.items()
-            }
+            # 转换为 ECharts 饼图友好的格式
+            sentiment_distribution = [
+                {"value": round(v / total * 100, 1), "name": {"positive": "正面", "negative": "负面", "neutral": "中性"}[k]}
+                for k, v in sentiment_stats.items() if v > 0
+            ]
         else:
-            sentiment_distribution = sentiment_stats
+            sentiment_distribution = []
 
         # 4. 正面/负面典型案例
         positive_examples = [c for c in representative_comments if c['sentiment'] == 'positive'][:5]
@@ -523,6 +526,20 @@ class AIReportPromptBuilder:
 - 互动模式: {self.profile.get("互动模式")}
 - 内容类型: {content.get("内容类型")}
 
+【分析重点要求】
+本报告需综合分析以下**四个维度**（缺一不可）：
+
+1. **用户评论内容** - 用户的真实反馈、观点、情感
+2. **评论热度** - 评论的点赞数（反映观点的受欢迎程度）
+3. **帖子内容** - 帖子标题/正文的主题和关键信息
+4. **帖子互动数据** - 点赞、分享、收藏、播放量等（反映内容整体热度）
+
+分析时要结合这四个维度：
+- 高赞评论 + 高热度帖子 = 大众共识/爆款话题
+- 高赞评论 + 低热度帖子 = 小众痛点/真实需求
+- 帖子内容引发的高频评论 = 用户关注点
+- 评论观点分布 vs 帖子互动趋势 = 舆论走向
+
 ## 统计数据
 - 总点赞: {stats.get("总量", {}).get("likes", 0)}
 - 总评论: {stats.get("总量", {}).get("comments", 0)}
@@ -535,13 +552,17 @@ class AIReportPromptBuilder:
 {top_contents_str}
 ```
 
-## 热词分析 (真实数据，必须用词云展示)
+## 热词分析 [必须用 ECharts 词云图渲染这些数据]
 ```json
 {hot_words_str}
 ```
+**使用说明**：将上述 JSON 数组作为 ECharts wordCloud series 的 data 源，格式 [{{"name": "热词", "value": 权重}}, ...]
 
-## 情感分布统计
+## 情感分布统计 [必须用 ECharts 饼图渲染这些数据]
+```json
 {sentiment_dist}
+```
+**使用说明**：将上述 JSON 作为 ECharts pie series 的 data 源，格式 [{{"value": 60.5, "name": "正面"}}, ...]
 
 ## 正面评价示例 (真实用户评论)
 ```json
@@ -581,12 +602,15 @@ class AIReportPromptBuilder:
 - 互动数据（点赞/评论/播放）
 - 简短分析为什么这条内容受欢迎
 
-### 4. 情感分析可视化
-- 情感分布饼图（使用上面的情感分布数据）
-- 情感趋势总结
+### 4. 情感分析可视化（评论内容 + 评论热度 + 帖子互动）
+- 情感分布饼图：基于**用户评论内容**的情感分析
+- 高赞评论的情感权重更高（反映大众情绪）
+- 结合帖子整体点赞/分享数据判断舆论热度
 
-### 5. 热词云
-使用上面提供的热词数据，突出用户讨论焦点
+### 5. 热词综合分析（帖子标题 + 用户评论 + 互动数据）
+- 热词云同时展示：帖子高频词 + 评论高频词
+- 不同颜色/标签区分：帖子词 vs 评论词
+- 每个热词标注来源内容的平均互动量
 
 ### 6. 评论深度分析
 - 用户关注焦点：从评论中提炼出3-5个用户最关心的话题

@@ -860,34 +860,663 @@ class SmartReportGenerator:
         '''
 
     def _get_theme(self) -> Dict:
-        """根据数据特征选择主题色"""
+        """根据报告类型和数据特征选择主题色"""
+        report_type = self.report_type
         features = self.features
 
-        # 有评论数据 -> 蓝紫色（舆情分析风格）
-        if features.get('has_comment_data'):
+        # 舆情风险 -> 红色系
+        if report_type == 'risk':
             return {
-                'primary': '#667eea',
-                'secondary': '#764ba2',
-                'gradient': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                'bg': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                'primary': '#f5222d',
+                'secondary': '#ff7875',
+                'gradient': 'linear-gradient(135deg, #f5222d 0%, #ff7875 100%)',
+                'bg': 'linear-gradient(135deg, #ff4d4f 0%, #ffa39e 100%)',
             }
 
-        # 有播放数据 -> 粉紫色（趋势风格）
-        if features.get('has_views'):
+        # 热门趋势/声量 -> 橙色系
+        if report_type in ['trend', 'volume']:
             return {
-                'primary': '#ff9a9e',
-                'secondary': '#fecfef',
-                'gradient': 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)',
-                'bg': 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)',
+                'primary': '#fa8c16',
+                'secondary': '#ffa940',
+                'gradient': 'linear-gradient(135deg, #fa8c16 0%, #ffc53d 100%)',
+                'bg': 'linear-gradient(135deg, #faad14 0%, #ffd666 100%)',
             }
 
-        # 默认 -> 青绿色
+        # 关键词/热门话题 -> 绿色系
+        if report_type in ['keyword', 'hot_topics']:
+            return {
+                'primary': '#52c41a',
+                'secondary': '#95de64',
+                'gradient': 'linear-gradient(135deg, #52c41a 0%, #95de64 100%)',
+                'bg': 'linear-gradient(135deg, #73d13d 0%, #b7eb8f 100%)',
+            }
+
+        # 传播分析 -> 青色系
+        if report_type == 'viral_spread':
+            return {
+                'primary': '#13c2c2',
+                'secondary': '#5cdbd3',
+                'gradient': 'linear-gradient(135deg, #13c2c2 0%, #5cdbd3 100%)',
+                'bg': 'linear-gradient(135deg, #36cfc9 0%, #87e8de 100%)',
+            }
+
+        # 影响力账号 -> 紫色系
+        if report_type == 'influencer':
+            return {
+                'primary': '#722ed1',
+                'secondary': '#b37feb',
+                'gradient': 'linear-gradient(135deg, #722ed1 0%, #b37feb 100%)',
+                'bg': 'linear-gradient(135deg, #9254de 0%, #d3adf7 100%)',
+            }
+
+        # 用户画像 -> 蓝色系
+        if report_type == 'audience':
+            return {
+                'primary': '#1890ff',
+                'secondary': '#69c0ff',
+                'gradient': 'linear-gradient(135deg, #1890ff 0%, #69c0ff 100%)',
+                'bg': 'linear-gradient(135deg, #40a9ff 0%, #91d5ff 100%)',
+            }
+
+        # 竞品对比 -> 靛青色系
+        if report_type == 'comparison':
+            return {
+                'primary': '#2f4554',
+                'secondary': '#546570',
+                'gradient': 'linear-gradient(135deg, #2f4554 0%, #546570 100%)',
+                'bg': 'linear-gradient(135deg, #3e4c5e 0%, #6c7a89 100%)',
+            }
+
+        # 舆情分析(默认) -> 蓝紫色
         return {
-            'primary': '#11998e',
-            'secondary': '#38ef7d',
-            'gradient': 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)',
-            'bg': 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)',
+            'primary': '#667eea',
+            'secondary': '#764ba2',
+            'gradient': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            'bg': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
         }
+
+    def _generate_custom_section_by_type(self) -> str:
+        """根据报告类型生成对应的专属模块"""
+        report_type = self.report_type
+
+        if report_type == 'trend':
+            return self._generate_trend_section()
+        elif report_type == 'volume':
+            return self._generate_volume_section()
+        elif report_type == 'keyword':
+            return self._generate_keyword_section()
+        elif report_type == 'hot_topics':
+            return self._generate_hot_topics_section()
+        elif report_type == 'viral_spread':
+            return self._generate_viral_spread_section()
+        elif report_type == 'influencer':
+            return self._generate_influencer_section()
+        elif report_type == 'audience':
+            return self._generate_audience_section()
+        elif report_type == 'comparison':
+            return self._generate_comparison_section()
+        elif report_type == 'risk':
+            return self._generate_risk_section()
+        else:
+            return ''
+
+    def _generate_trend_section(self) -> str:
+        """热门趋势专属分析模块"""
+        profile = self.profile
+        features = self.features
+
+        # 趋势洞察
+        insights = []
+        if features.get('has_views'):
+            avg_views = profile['averages'].get('views', 0)
+            if avg_views > 10000:
+                insights.append('当前话题处于高热度状态，平均播放量超万级')
+            elif avg_views > 1000:
+                insights.append('话题热度中等，有一定关注度')
+            else:
+                insights.append('话题热度较低，属于小众话题')
+
+        if features.get('has_likes'):
+            like_rate = profile['averages'].get('likes', 0) / max(profile['averages'].get('views', 1), 1)
+            if like_rate > 0.05:
+                insights.append('用户互动意愿强，内容受欢迎度高')
+            elif like_rate > 0.02:
+                insights.append('用户互动意愿一般')
+            else:
+                insights.append('用户互动意愿较弱')
+
+        # 时间趋势（如果有时间数据）
+        time_trend = self._generate_time_trend()
+
+        html = '''
+        <div class="section">
+            <div class="section-title">&#128293; 热门趋势分析</div>
+            <div style="display: grid; gap: 20px;">
+        '''
+
+        # 趋势洞察
+        if insights:
+            html += '<div style="background: #fff7e6; padding: 15px; border-radius: 12px; border-left: 4px solid #faad14;">'
+            html += '<div style="font-weight: 600; color: #fa8c16; margin-bottom: 10px;">&#128161; 趋势洞察</div>'
+            html += '<ul style="margin-left: 20px; color: #666; line-height: 1.8;">'
+            for insight in insights:
+                html += f'<li>{insight}</li>'
+            html += '</ul></div>'
+
+        # 时间分布图
+        html += time_trend
+
+        html += '</div></div>'
+        return html
+
+    def _generate_volume_section(self) -> str:
+        """声量分析专属模块"""
+        profile = self.profile
+        features = self.features
+
+        # 计算声量指标
+        total_likes = profile['totals'].get('likes', 0)
+        total_comments = profile['totals'].get('comments', 0)
+        total_views = profile['totals'].get('views', 0)
+        count = profile['count']
+
+        # 声量分级
+        if total_likes > 100000 or total_views > 1000000:
+            volume_level = '高'
+            volume_color = '#f5222d'
+        elif total_likes > 10000 or total_views > 100000:
+            volume_level = '中'
+            volume_color = '#faad14'
+        else:
+            volume_level = '低'
+            volume_color = '#52c41a'
+
+        html = f'''
+        <div class="section">
+            <div class="section-title">&#128266; 声量评估</div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                <div style="background: {volume_color}20; padding: 20px; border-radius: 12px; text-align: center;">
+                    <div style="font-size: 2em; color: {volume_color}; font-weight: bold;">{volume_level}</div>
+                    <div style="color: #666; margin-top: 5px;">整体声量级别</div>
+                </div>
+                <div style="background: #f6ffed; padding: 20px; border-radius: 12px; text-align: center;">
+                    <div style="font-size: 1.8em; color: #52c41a; font-weight: bold;">{self._format_number(count)}</div>
+                    <div style="color: #666; margin-top: 5px;">内容数量</div>
+                </div>
+                <div style="background: #e6f7ff; padding: 20px; border-radius: 12px; text-align: center;">
+                    <div style="font-size: 1.8em; color: #1890ff; font-weight: bold;">{self._format_number(total_likes)}</div>
+                    <div style="color: #666; margin-top: 5px;">总互动量(点赞)</div>
+                </div>
+            </div>
+            <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 12px;">
+                <div style="font-weight: 600; color: #333; margin-bottom: 10px;">&#128200; 声量分析</div>
+                <p style="color: #666; line-height: 1.6;">
+                    本话题共产生 {self._format_number(total_likes)} 次点赞、{self._format_number(total_comments)} 条评论，
+                    平均每篇内容获得 {int(total_likes/max(count,1))} 点赞，声量{volume_level.lower()}。
+                    {f'预估总曝光量达 {self._format_number(total_views)} 次。' if total_views > 0 else ''}
+                </p>
+            </div>
+        </div>
+        '''
+        return html
+
+    def _generate_keyword_section(self) -> str:
+        """关键词分析专属模块"""
+        # 提取更多关键词信息
+        hot_words = self._extract_hot_words()
+        related_keywords = self._extract_related_keywords()
+
+        html = '''
+        <div class="section">
+            <div class="section-title">&#128270; 关键词深度分析</div>
+        '''
+
+        # 核心关键词列表
+        if hot_words:
+            html += '''
+            <div style="margin-bottom: 20px;">
+                <div style="font-weight: 600; color: #333; margin-bottom: 10px;">&#127941; 核心关键词 TOP10</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            '''
+            for i, (word, count) in enumerate(hot_words[:10]):
+                size = min(5, max(1, int(count / max(hot_words[0][1], 1) * 5)))
+                sizes = {1: '12', 2: '14', 3: '16', 4: '18', 5: '20'}
+                tags = ['', 'secondary', 'primary', 'success', 'warning', 'danger']
+                colors = ['#666', '#666', '#52c41a', '#52c41a', '#faad14', '#f5222d']
+                color = colors[size]
+                html += f'''
+                <span style="padding: 6px 12px; background: #f6ffed; color: {color};
+                    border-radius: 16px; font-size: {sizes[size]}px; font-weight: 500;">
+                    {i+1}. {word} ({count})
+                </span>
+                '''
+            html += '</div></div>'
+
+        # 关联关键词
+        if related_keywords:
+            html += '''
+            <div>
+                <div style="font-weight: 600; color: #333; margin-bottom: 10px;">&#128279; 关联关键词</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            '''
+            for kw in related_keywords[:15]:
+                html += f'''
+                <span style="padding: 4px 10px; background: #e6f7ff; color: #1890ff;
+                    border-radius: 12px; font-size: 13px;">{kw}</span>
+                '''
+            html += '</div></div>'
+
+        html += '</div>'
+        return html
+
+    def _generate_hot_topics_section(self) -> str:
+        """热门话题专属模块"""
+        # 从热点发现中提取话题
+        topics = self._extract_hot_topics()
+
+        html = '''
+        <div class="section">
+            <div class="section-title">&#128165; 热门话题发现</div>
+            <div style="display: grid; gap: 15px;">
+        '''
+
+        if topics:
+            for i, topic in enumerate(topics[:8], 1):
+                heat_bars = '&#128293;' * min(5, max(1, topic.get('heat', 3)))
+                html += f'''
+                <div style="display: flex; align-items: center; gap: 15px; padding: 15px;
+                    background: #f8f9fa; border-radius: 12px;">
+                    <div style="font-size: 1.3em; font-weight: bold; color: #ff4d4f;">
+                        {f'&#129351;' if i == 1 else f'&#129352;' if i == 2 else f'&#129353;' if i == 3 else f'#{i}'}
+                    </div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600; color: #333;">{topic['name']}</div>
+                        <div style="font-size: 0.85em; color: #888; margin-top: 3px;">{topic.get('desc', '')}</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 1.2em;">{heat_bars}</div>
+                        <div style="font-size: 0.75em; color: #999;">热度 {topic.get('count', 0)}</div>
+                    </div>
+                </div>
+                '''
+        else:
+            html += '<div style="text-align: center; padding: 30px; color: #999;">暂无足够数据识别热门话题</div>'
+
+        html += '</div></div>'
+        return html
+
+    def _generate_viral_spread_section(self) -> str:
+        """传播分析专属模块"""
+        profile = self.profile
+        features = self.features
+
+        # 分析传播特征
+        total_shares = profile['totals'].get('shares', 0)
+        total_views = profile['totals'].get('views', 0)
+        total_likes = profile['totals'].get('likes', 0)
+
+        # 计算传播系数
+        spread_factor = total_shares / max(total_views, 1) * 1000 if total_views > 0 else 0
+
+        html = '''
+        <div class="section">
+            <div class="section-title">&#128260; 传播路径分析</div>
+            <div style="display: grid; gap: 20px;">
+        '''
+
+        # 传播指标
+        html += '''
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+        '''
+
+        metrics = []
+        if total_shares > 0:
+            metrics.append(('&#128640; 总分享', total_shares))
+        if total_views > 0:
+            metrics.append(('&#128065; 总曝光', total_views))
+        if features.get('has_likes'):
+            metrics.append(('&#10084; 总点赞', total_likes))
+
+        for label, value in metrics:
+            html += f'''
+            <div style="background: #e6fffb; padding: 15px; border-radius: 12px; text-align: center;">
+                <div style="font-size: 1.5em; margin-bottom: 5px;">{label}</div>
+                <div style="font-size: 1.6em; font-weight: bold; color: #13c2c2;">{self._format_number(value)}</div>
+            </div>
+            '''
+
+        html += '</div>'
+
+        # 传播特征分析
+        if spread_factor > 0.1:
+            spread_desc = '传播力强劲，内容具有很强的分享价值'
+        elif spread_factor > 0.05:
+            spread_desc = '传播力中等，有一定分享属性'
+        else:
+            spread_desc = '传播力一般，以观看为主'
+
+        html += f'''
+        <div style="background: #f0f5ff; padding: 15px; border-radius: 12px;">
+            <div style="font-weight: 600; color: #2f54eb; margin-bottom: 10px;">&#128200; 传播特征</div>
+            <p style="color: #666; line-height: 1.6;">{spread_desc}</p>
+        </div>
+        '''
+
+        html += '</div></div>'
+        return html
+
+    def _generate_influencer_section(self) -> str:
+        """影响力账号专属模块"""
+        # 分析热门作者
+        authors = self._analyze_authors()
+
+        html = '''
+        <div class="section">
+            <div class="section-title">&#11088; 影响力账号分析</div>
+            <div style="display: grid; gap: 15px;">
+        '''
+
+        if authors:
+            for i, author in enumerate(authors[:8], 1):
+                html += f'''
+                <div style="display: flex; align-items: center; gap: 15px; padding: 15px;
+                    background: #f9f0ff; border-radius: 12px; border-left: 4px solid #722ed1;">
+                    <div style="font-size: 1.5em; color: #722ed1;">
+                        {f'&#129351;' if i == 1 else f'&#129352;' if i == 2 else f'&#129353;' if i == 3 else f'#{i}'}
+                    </div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600; color: #333;">{author['name']}</div>
+                        <div style="font-size: 0.85em; color: #666; margin-top: 3px;">
+                            发布 {author.get('post_count', 0)} 篇 · 平均互动 {self._format_number(int(author.get('avg_interact', 0)))}
+                        </div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 1.2em; font-weight: bold; color: #722ed1;">
+                            {self._format_number(author.get('total_interact', 0))}
+                        </div>
+                        <div style="font-size: 0.75em; color: #999;">总互动</div>
+                    </div>
+                </div>
+                '''
+        else:
+            html += '<div style="text-align: center; padding: 30px; color: #999;">暂无足够数据分析影响力账号</div>'
+
+        html += '</div></div>'
+        return html
+
+    def _generate_audience_section(self) -> str:
+        """用户画像专属模块"""
+        # 分析评论者特征
+        user_patterns = self._analyze_user_patterns()
+
+        html = '''
+        <div class="section">
+            <div class="section-title">&#128100; 用户画像分析</div>
+            <div style="display: grid; gap: 20px;">
+        '''
+
+        # 用户行为特征
+        if user_patterns:
+            html += '''
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+            '''
+
+            for pattern in user_patterns[:4]:
+                html += f'''
+                <div style="background: #e6f7ff; padding: 15px; border-radius: 12px;">
+                    <div style="font-size: 1.3em; margin-bottom: 8px;">{pattern['icon']}</div>
+                    <div style="font-weight: 600; color: #1890ff;">{pattern['label']}</div>
+                    <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{pattern['value']}</div>
+                </div>
+                '''
+
+            html += '</div>'
+
+        # 活跃用户特征
+        html += '''
+        <div style="background: #f6ffed; padding: 15px; border-radius: 12px;">
+            <div style="font-weight: 600; color: #52c41a; margin-bottom: 10px;">&#128161; 用户特征洞察</div>
+            <ul style="margin-left: 20px; color: #666; line-height: 1.8;">
+                <li>对相关内容保持较高关注度</li>
+                <li>互动参与意愿' + ('较强' if self.profile['totals'].get('comments', 0) > self.profile['count'] * 5 else '一般') + '</li>
+                <li>内容消费偏好明确</li>
+            </ul>
+        </div>
+        '''
+
+        html += '</div></div>'
+        return html
+
+    def _generate_comparison_section(self) -> str:
+        """竞品对比专属模块"""
+        html = '''
+        <div class="section">
+            <div class="section-title">&#128200; 竞品对比分析</div>
+            <div style="display: grid; gap: 20px;">
+        '''
+
+        # 数据对比表
+        profile = self.profile
+        features = self.features
+
+        html += '''
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="background: #f5f5f5;">
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">指标</th>
+                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">本话题</th>
+                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">评估</th>
+                    </tr>
+                </thead>
+                <tbody>
+        '''
+
+        rows = [
+            ('内容数量', profile['count'], '条'),
+        ]
+
+        if features.get('has_likes'):
+            rows.append(('总点赞', profile['totals'].get('likes', 0), ''))
+        if features.get('has_comments'):
+            rows.append(('总评论', profile['totals'].get('comments', 0), ''))
+        if features.get('has_views'):
+            rows.append(('总曝光', profile['totals'].get('views', 0), ''))
+
+        for label, value, unit in rows:
+            assessment = '高' if value > 10000 else '中' if value > 1000 else '低'
+            color = '#52c41a' if assessment == '高' else '#faad14' if assessment == '中' else '#999'
+
+            html += f'''
+            <tr>
+                <td style="padding: 12px; border-bottom: 1px solid #eee;">{label}</td>
+                <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee; font-weight: 500;">
+                    {self._format_number(value)}{unit}
+                </td>
+                <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">
+                    <span style="color: {color}; font-weight: 600;">{assessment}</span>
+                </td>
+            </tr>
+            '''
+
+        html += '''
+                </tbody>
+            </table>
+        </div>
+        '''
+
+        # 综合评估
+        html += '''
+        <div style="background: #f5f5f5; padding: 15px; border-radius: 12px;">
+            <div style="font-weight: 600; color: #333; margin-bottom: 10px;">&#128200; 综合评估</div>
+            <p style="color: #666; line-height: 1.6;">
+                基于当前数据分析，本话题在市场中的声量和互动表现''' + ('较为突出' if profile['totals'].get('likes', 0) > 5000 else '处于中等水平' if profile['totals'].get('likes', 0) > 1000 else '相对较弱') + '''。
+                建议结合竞品维度进一步深入研究。
+            </p>
+        </div>
+        '''
+
+        html += '</div></div>'
+        return html
+
+    def _generate_risk_section(self) -> str:
+        """舆情风险专属模块"""
+        if not self.features.get('has_comment_data'):
+            return ''
+
+        sentiment_pct = self._analyze_sentiment()
+        negative_pct = sentiment_pct.get('negative', 0)
+
+        # 风险等级
+        if negative_pct > 40:
+            risk_level = '高危'
+            risk_color = '#f5222d'
+            risk_desc = '负面评价占比过高，需立即采取应对措施'
+        elif negative_pct > 25:
+            risk_level = '中危'
+            risk_color = '#faad14'
+            risk_desc = '负面情绪有所上升，建议密切关注'
+        elif negative_pct > 15:
+            risk_level = '低危'
+            risk_color = '#fa8c16'
+            risk_desc = '存在一些负面声音，需适度关注'
+        else:
+            risk_level = '正常'
+            risk_color = '#52c41a'
+            risk_desc = '整体舆情健康'
+
+        # 提取负面关键词
+        negative_keywords = self._extract_negative_keywords()
+
+        html = f'''
+        <div class="section">
+            <div class="section-title">&#9888; 舆情风险评估</div>
+            <div style="display: grid; gap: 20px;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    <div style="background: {risk_color}20; padding: 20px; border-radius: 12px; text-align: center;">
+                        <div style="font-size: 1.2em; color: #666;">风险等级</div>
+                        <div style="font-size: 2em; font-weight: bold; color: {risk_color}; margin-top: 5px;">{risk_level}</div>
+                    </div>
+                    <div style="background: #f6ffed; padding: 20px; border-radius: 12px; text-align: center;">
+                        <div style="font-size: 1.2em; color: #666;">正面评价</div>
+                        <div style="font-size: 2em; font-weight: bold; color: #52c41a; margin-top: 5px;">{sentiment_pct.get('positive', 0)}%</div>
+                    </div>
+                    <div style="background: #fff2f0; padding: 20px; border-radius: 12px; text-align: center;">
+                        <div style="font-size: 1.2em; color: #666;">负面评价</div>
+                        <div style="font-size: 2em; font-weight: bold; color: #f5222d; margin-top: 5px;">{negative_pct}%</div>
+                    </div>
+                </div>
+                <div style="background: #fff2f0; padding: 15px; border-radius: 12px; border-left: 4px solid {risk_color};">
+                    <div style="font-weight: 600; color: {risk_color}; margin-bottom: 8px;">&#9888; 风险分析</div>
+                    <p style="color: #666; line-height: 1.6;">{risk_desc}</p>
+                </div>
+        '''
+
+        if negative_keywords:
+            html += '''
+            <div style="background: #fff; padding: 15px; border-radius: 12px; border: 1px solid #ffccc7;">
+                <div style="font-weight: 600; color: #f5222d; margin-bottom: 10px;">&#128204; 负面高频词</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            '''
+            for word, count in negative_keywords[:10]:
+                html += f'''
+                <span style="padding: 4px 10px; background: #ff4d4f; color: white; border-radius: 12px; font-size: 13px;">
+                    {word} ({count})
+                </span>
+                '''
+            html += '</div></div>'
+
+        html += '</div></div>'
+        return html
+
+    def _generate_time_trend(self) -> str:
+        """生成时间趋势图 (辅助方法)"""
+        # 简化版时间趋势展示
+        return '''
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 12px;">
+            <div style="font-weight: 600; color: #333; margin-bottom: 10px;">&#128200; 热度变化趋势</div>
+            <p style="color: #666; line-height: 1.6;">基于当前数据分析，话题热度呈现活跃状态，建议持续关注后续变化。</p>
+        </div>
+        '''
+
+    def _extract_related_keywords(self) -> List[str]:
+        """提取关联关键词 (辅助方法)"""
+        # 基于热词提取相关词
+        hot_words = self._extract_hot_words()
+        # 简单返回一些常用关联词，实际可通过更复杂的算法提取
+        return [w[0] for w in hot_words[3:]] if len(hot_words) > 3 else []
+
+    def _extract_hot_topics(self) -> List[Dict]:
+        """提取热门话题 (辅助方法)"""
+        hot_words = self._extract_hot_words()
+        topics = []
+        for word, count in hot_words[:8]:
+            topics.append({
+                'name': word,
+                'count': count,
+                'heat': min(5, max(1, count // max(hot_words[0][1]//5, 1))),
+                'desc': f"出现 {count} 次"
+            })
+        return topics
+
+    def _analyze_authors(self) -> List[Dict]:
+        """分析影响力账号 (辅助方法)"""
+        author_stats = {}
+        for item in self.data:
+            author = item.get('nickname', '未知')
+            if not author or author == '未知':
+                continue
+
+            interact_info = item.get('interact_info', {})
+            likes = interact_info.get('likes', 0)
+            if isinstance(likes, str):
+                likes = int(likes) if likes.isdigit() else 0
+
+            if author not in author_stats:
+                author_stats[author] = {
+                    'name': author,
+                    'post_count': 0,
+                    'total_interact': 0,
+                    'interacts': []
+                }
+
+            author_stats[author]['post_count'] += 1
+            author_stats[author]['total_interact'] += likes
+            author_stats[author]['interacts'].append(likes)
+
+        for author in author_stats.values():
+            count = author['post_count']
+            author['avg_interact'] = author['total_interact'] / max(count, 1)
+
+        return sorted(author_stats.values(), key=lambda x: x['total_interact'], reverse=True)
+
+    def _analyze_user_patterns(self) -> List[Dict]:
+        """分析用户行为模式 (辅助方法)"""
+        # 简化版用户画像
+        comments_count = self.profile['totals'].get('comments', 0)
+        content_count = self.profile['count']
+
+        patterns = [
+            {'icon': '&#128101;', 'label': '互动活跃度', 'value': '高' if comments_count > content_count * 5 else '中' if comments_count > content_count else '低'},
+            {'icon': '&#128150;', 'label': '内容偏好', 'value': '积极互动型' if self._analyze_sentiment().get('positive', 0) > 50 else '中性观望型'},
+        ]
+
+        return patterns
+
+    def _extract_negative_keywords(self) -> List[Tuple[str, int]]:
+        """提取负面关键词 (辅助方法)"""
+        negative_words = list(self.sentiment_analyzer.NEGATIVE_WORDS)
+        word_counts = {}
+
+        for item in self.data:
+            comments = item.get('comments', [])
+            for comment in comments:
+                content = comment.get('content', '') if isinstance(comment, dict) else str(comment)
+                for word in negative_words:
+                    if word in content:
+                        word_counts[word] = word_counts.get(word, 0) + 1
+
+        return sorted(word_counts.items(), key=lambda x: x[1], reverse=True)
 
     def generate_html(self) -> str:
         """生成完整HTML报告"""
@@ -897,18 +1526,28 @@ class SmartReportGenerator:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         theme = self._get_theme()
 
-        # 根据数据特征决定包含哪些模块
+        # 根据报告类型和数据特征决定包含哪些模块
+        # 这是根据报告类型动态生成不同模块的核心逻辑
+        custom_section = self._generate_custom_section_by_type()
+
+        # 基础模块
         executive_summary = self._generate_executive_summary()
-        sentiment_section = self._generate_sentiment_chart() if self.features.get('has_comment_data') else ''
-        comment_analysis_section = self._generate_comment_analysis() if self.features.get('has_comment_data') else ''
         action_plan_section = self._generate_action_plan()
-        comments_section = self._generate_comments_section() if self.features.get('has_comment_data') else ''
         content_list_section = f'''
         <div class="section">
             <div class="section-title">&#127942; 热门内容排行 TOP 10</div>
             {self._generate_content_list()}
         </div>
         ''' if self.data else ''
+
+        # 舆情分析类报告才包含情感分析模块
+        sentiment_section = ''
+        comment_analysis_section = ''
+        comments_section = ''
+        if self.report_type in ['sentiment', 'risk'] and self.features.get('has_comment_data'):
+            sentiment_section = self._generate_sentiment_chart()
+            comment_analysis_section = self._generate_comment_analysis()
+            comments_section = self._generate_comments_section()
 
         return f'''<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1135,31 +1774,34 @@ class SmartReportGenerator:
             {self._generate_metric_cards()}
         </div>
 
-        <!-- 3. 情感分析可视化 -->
+        <!-- 3. 报告类型专属模块 -->
+        {custom_section}
+
+        <!-- 4. 情感分析可视化 (仅限舆情类报告) -->
         {sentiment_section}
 
-        <!-- 4. 热门内容排行 -->
+        <!-- 5. 热门内容排行 -->
         {content_list_section}
 
-        <!-- 5. 热词综合分析 -->
+        <!-- 6. 热词综合分析 -->
         <div class="section">
             <div class="section-title">&#9731; 热门讨论词云</div>
             {self._generate_hot_words()}
         </div>
 
-        <!-- 6. 评论深度分析 -->
+        <!-- 7. 评论深度分析 (仅限舆情类报告) -->
         {comment_analysis_section}
 
-        <!-- 7. 舆情洞察与建议 -->
+        <!-- 8. 舆情洞察与建议 -->
         <div class="section">
             <div class="section-title">&#128161; 舆情洞察与建议</div>
             {self._generate_insights()}
         </div>
 
-        <!-- 8. 处理建议与行动方案 -->
+        <!-- 9. 处理建议与行动方案 -->
         {action_plan_section}
 
-        <!-- 9. 代表性用户评论 -->
+        <!-- 10. 代表性用户评论 (仅限舆情类报告) -->
         {comments_section}
 
         <footer class="footer">

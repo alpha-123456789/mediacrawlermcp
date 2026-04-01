@@ -707,15 +707,16 @@ async def crawl_media(
                 from ai_report_generator import generate_ai_report_data
                 from llm_report_generator import generate_report_with_llm
 
-                # 1. 准备 AI 报告数据
-                ai_data = generate_ai_report_data(platform, keywords, items)
+                # 1. 准备 AI 报告数据（传入 report_type 以生成对应类型的报告）
+                ai_data = generate_ai_report_data(platform, keywords, items, report_type)
 
                 # 2. 调用 LLM API 生成报告
                 report_path, summary = await generate_report_with_llm(
                     platform=platform,
                     keywords=keywords,
                     ai_data=ai_data,
-                    output_path=output_path
+                    output_path=output_path,
+                    report_type=report_type
                 )
 
                 abs_path = os.path.abspath(report_path)

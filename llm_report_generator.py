@@ -268,7 +268,8 @@ async def generate_report_with_llm(
     platform: str,
     keywords: str,
     ai_data: Dict,
-    output_path: str
+    output_path: str,
+    report_type: str = "sentiment"
 ) -> Tuple[str, str]:
     """
     使用 LLM 生成报告
@@ -278,6 +279,7 @@ async def generate_report_with_llm(
         keywords: 关键词
         ai_data: AI 报告数据（包含 prompt、数据画像等）
         output_path: 输出目录
+        report_type: 报告类型
 
     Returns:
         (report_path, summary)
@@ -294,6 +296,21 @@ async def generate_report_with_llm(
     }
     platform_name = platform_names.get(platform, platform)
 
+    # 报告类型名称映射
+    report_type_names = {
+        'sentiment': '舆情分析',
+        'trend': '热门趋势',
+        'volume': '声量分析',
+        'keyword': '关键词分析',
+        'hot_topics': '热门话题',
+        'viral_spread': '传播分析',
+        'influencer': '影响力账号',
+        'audience': '用户画像',
+        'comparison': '竞品对比',
+        'risk': '舆情风险'
+    }
+    report_type_name = report_type_names.get(report_type, '舆情分析')
+
     # 调用 LLM 生成报告
     html_content = await call_llm(prompt)
 
@@ -301,12 +318,12 @@ async def generate_report_with_llm(
     output_dir = Path(output_path)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 生成文件名
+    # 生成文件名（包含报告类型）
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_kw = "".join(c if c.isalnum() or c in '-_ ' else '_' for c in keywords)
     safe_kw = safe_kw.strip()
 
-    filename = f"{platform_name}_{safe_kw}_AI报告_{timestamp}.html"
+    filename = f"{platform_name}_{safe_kw}_{report_type_name}_{timestamp}.html"
     report_path = output_dir / filename
 
     # 保存 HTML 文件
@@ -314,7 +331,7 @@ async def generate_report_with_llm(
         f.write(html_content)
 
     # 生成摘要
-    summary = generate_summary(profile, detailed_data, platform_name, keywords)
+    summary = generate_summary(profile, detailed_data, platform_name, keywords, report_type, report_type_name)
 
     return str(report_path), summary
 
@@ -323,7 +340,9 @@ def generate_summary(
     profile: Dict,
     detailed_data: Dict,
     platform_name: str,
-    keywords: str
+    keywords: str,
+    report_type: str = "sentiment",
+    report_type_name: str = "舆情分析"
 ) -> str:
     """生成报告摘要"""
     total_items = profile.get("总数据量", 0)
@@ -332,43 +351,96 @@ def generate_summary(
     content_type = profile.get("内容特征", {}).get("内容类型", "未知")
 
     summary_parts = [
-        f"📊 {platform_name}「{keywords}」舆情分析报告\n",
+        f"📊 {platform_name}「{keywords}」{report_type_name}报告\n",
         f"📈 数据概览：采集 {total_items} 条{content_type}",
         f"   总点赞: {stats.get('likes', 0)} | 总评论: {stats.get('comments', 0)} | 总播放: {stats.get('views', 0)}",
     ]
 
-    # 情感分析摘要 - sentiment_distribution 是列表格式
-    positive = 0
-    negative = 0
-    neutral = 0
-    for item in sentiment_dist:
-        if isinstance(item, dict):
-            name = item.get("name", "")
-            value = item.get("value", 0)
-            if name == "正面":
-                positive = value
-            elif name == "负面":
-                negative = value
-            elif name == "中性":
-                neutral = value
+    # 根据报告类型生成不同的摘要内容
+    if report_type == 'risk':
+        # 风险报告摘要
+        positive = 0
+        negative = 0
+        for item in sentiment_dist:
+            if isinstance(item, dict):
+                name = item.get("name", "")
+                value = item.get("value", 0)
+                if name == "正面":
+                    positive = value
+                elif name == "负面":
+                    negative = value
 
-    summary_parts.append(
-        f"💭 情感分布：正面 {positive:.1f}% | 负面 {negative:.1f}% | 中性 {neutral:.1f}%"
-    )
+        summary_parts.append(
+            f"⚠️ 风险评估：负面评价 {negative:.1f}% | 正面评价 {positive:.1f}%"
+        )
 
-    # 根据情感给出判断
-    if positive > 60:
-        summary_parts.append("✅ 整体口碑良好，正面评价占主导")
-    elif negative > 30:
-        summary_parts.append("⚠️ 负面评价较多，需要关注舆情风险")
+        if negative > 40:
+            summary_parts.append("🚨 风险等级：高危，需立即采取应对措施")
+        elif negative > 25:
+            summary_parts.append("⚠️ 风险等级：中危，建议密切关注")
+        elif negative > 15:
+            summary_parts.append("⚡ 风险等级：低危，需适度关注")
+        else:
+            summary_parts.append("✅ 风险等级：正常，整体舆情健康")
+
+    elif report_type in ['trend', 'volume']:
+        # 趋势/声量报告摘要
+        summary_parts.append(
+            f"📊 声量规模：内容 {total_items} 条 | 总互动 {stats.get('likes', 0) + stats.get('comments', 0)}"
+        )
+        if stats.get('views', 0) > 0:
+            summary_parts.append(f"👁️ 总曝光：{stats.get('views', 0)} 次")
+
+    elif report_type in ['keyword', 'hot_topics']:
+        # 关键词/话题报告摘要
+        hot_words = detailed_data.get("hot_words", [])
+        if hot_words:
+            top_words = [w.get("name", "") for w in hot_words[:5] if isinstance(w, dict)]
+            if top_words:
+                summary_parts.append(f"🔑 核心关键词：{', '.join(top_words)}")
+
+    elif report_type == 'influencer':
+        # 影响力账号报告摘要
+        top_contents = detailed_data.get("top_contents", [])
+        if top_contents:
+            top_author = top_contents[0].get('author', '未知') if top_contents else '未知'
+            summary_parts.append(f"⭐ 头部账号：{top_author}")
+
     else:
-        summary_parts.append("📊 舆情分布均匀，需要具体场景分析")
+        # 默认舆情分析摘要
+        # 情感分析摘要 - sentiment_distribution 是列表格式
+        positive = 0
+        negative = 0
+        neutral = 0
+        for item in sentiment_dist:
+            if isinstance(item, dict):
+                name = item.get("name", "")
+                value = item.get("value", 0)
+                if name == "正面":
+                    positive = value
+                elif name == "负面":
+                    negative = value
+                elif name == "中性":
+                    neutral = value
 
-    # 热词摘要 - hot_words 是列表格式 [{"name": "词", "value": 100}, ...]
-    hot_words = detailed_data.get("hot_words", [])
-    if hot_words:
-        top_words = [w.get("name", "") for w in hot_words[:5] if isinstance(w, dict)]
-        if top_words:
-            summary_parts.append(f"🔥 热门讨论：{', '.join(top_words)}")
+        summary_parts.append(
+            f"💭 情感分布：正面 {positive:.1f}% | 负面 {negative:.1f}% | 中性 {neutral:.1f}%"
+        )
+
+        # 根据情感给出判断
+        if positive > 60:
+            summary_parts.append("✅ 整体口碑良好，正面评价占主导")
+        elif negative > 30:
+            summary_parts.append("⚠️ 负面评价较多，需要关注舆情风险")
+        else:
+            summary_parts.append("📊 舆情分布均匀，需要具体场景分析")
+
+    # 热词摘要 - 所有报告类型都显示
+    if report_type not in ['keyword', 'hot_topics']:
+        hot_words = detailed_data.get("hot_words", [])
+        if hot_words:
+            top_words = [w.get("name", "") for w in hot_words[:5] if isinstance(w, dict)]
+            if top_words:
+                summary_parts.append(f"🔥 热门讨论：{', '.join(top_words)}")
 
     return "\n".join(summary_parts)

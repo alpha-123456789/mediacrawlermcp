@@ -471,10 +471,291 @@ class DataProfiler:
 class AIReportPromptBuilder:
     """构建给 AI 的提示词"""
 
-    def __init__(self, platform: str, keywords: str, profile: Dict):
+    # 报告类型名称映射
+    REPORT_TYPE_NAMES = {
+        'sentiment': '舆情分析',
+        'trend': '热门趋势',
+        'volume': '声量分析',
+        'keyword': '关键词分析',
+        'hot_topics': '热门话题',
+        'viral_spread': '传播分析',
+        'influencer': '影响力账号',
+        'audience': '用户画像',
+        'comparison': '竞品对比',
+        'risk': '舆情风险'
+    }
+
+    # 报告类型主题色
+    REPORT_TYPE_THEMES = {
+        'sentiment': '#667eea → #764ba2 (蓝紫色)',
+        'trend': '#fa8c16 → #ffc53d (橙黄色)',
+        'volume': '#faad14 → #ffd666 (金黄色)',
+        'keyword': '#52c41a → #95de64 (绿色)',
+        'hot_topics': '#52c41a → #95de64 (绿色)',
+        'viral_spread': '#13c2c2 → #5cdbd3 (青色)',
+        'influencer': '#722ed1 → #b37feb (紫色)',
+        'audience': '#1890ff → #69c0ff (蓝色)',
+        'comparison': '#2f4554 → #546570 (靛青色)',
+        'risk': '#f5222d → #ff7875 (红色)'
+    }
+
+    def __init__(self, platform: str, keywords: str, profile: Dict, report_type: str = 'sentiment'):
         self.platform = platform
         self.keywords = keywords
         self.profile = profile
+        self.report_type = report_type
+
+    def _get_module4_content(self) -> str:
+        """根据报告类型生成模块4的内容"""
+        detailed_data = self.profile.get("详细数据", {})
+        sentiment_dist = json.dumps(detailed_data.get("sentiment_distribution", []), ensure_ascii=False)
+
+        modules = {
+            'sentiment': f"""### 4. 情感分析可视化（**最重要**）
+- 必须使用 ECharts 饼图，基于提供的 sentiment_distribution 数据
+- 饼图中每个扇区必须有明确的数据标签，例如"正面 65%"
+- 图表下方用文字总结情感趋势
+- 结合评论热度（点赞数）分析情感权重
+- 关联帖子互动数据分析整体舆论走向""",
+
+            'trend': f"""### 4. 热度趋势分析（**最重要**）
+- 使用 ECharts 折线图或柱状图展示热度变化趋势
+- 基于帖子发布时间（如果有）绘制时间序列图
+- 标注热度高峰点，分析热点事件
+- 下方文字总结：话题热度处于什么阶段（上升期/爆发期/衰退期）
+- 预测未来趋势走向
+- 如果有情感数据可辅助分析：{sentiment_dist}""",
+
+            'volume': f"""### 4. 声量分布分析（**最重要**）
+- 使用 ECharts 柱状图或雷达图展示声量指标
+- 声量维度包括：内容数量、总点赞、总评论、总曝光
+- 对比各项指标的占比分布
+- 下方文字总结：整体声量级别（高/中/低）
+- 分析哪些平台/渠道贡献了主要声量
+- 情感分布参考（如有评论数据）：{sentiment_dist}""",
+
+            'keyword': f"""### 4. 关键词关联分析（**最重要**）
+- 使用 ECharts 关系图或桑基图展示关键词关联
+- 核心关键词居中，关联词围绕分布
+- 用线条粗细表示关联强度
+- 下方文字总结：核心关键词是什么，与哪些词关联最紧密
+- 分析关键词的情感倾向（正面/负面词有哪些）
+- 情感分布参考：{sentiment_dist}""",
+
+            'hot_topics': f"""### 4. 话题热度排行（**最重要**）
+- 使用 ECharts 横向柱状图展示 TOP 10 热门话题
+- 每个话题标注热度值和出现频次
+- 用颜色区分话题类型（产品/服务/活动/人物等）
+- 下方文字总结：最热门的话题是什么，为什么火
+- 分析话题之间的关联和演变
+- 情感分布参考：{sentiment_dist}""",
+
+            'viral_spread': f"""### 4. 传播路径分析（**最重要**）
+- 使用 ECharts 桑基图或关系图展示传播链路
+- 分析内容从发布到扩散的传播节点
+- 标注关键传播者（点赞/分享高的用户）
+- 下方文字总结：传播模式是什么（病毒式/圈层式/线性式）
+- 传播关键节点和加速因素分析
+- 情感在传播过程中的变化：{sentiment_dist}""",
+
+            'influencer': f"""### 4. 影响力账号排行（**最重要**）
+- 使用 ECharts 横向柱状图展示 TOP 10 影响力账号
+- 排序依据：总互动量（点赞+评论+分享）
+- 每个账号展示：发布内容数、平均互动、粉丝影响力
+- 下方文字总结：谁是核心意见领袖，有什么特征
+- 分析头部账号的内容策略和互动特点
+- 这些账号的评论区情感倾向：{sentiment_dist}""",
+
+            'audience': f"""### 4. 用户画像分析（**最重要**）
+- 使用 ECharts 饼图或雷达图展示用户特征分布
+- 维度包括：互动活跃度、评论情感倾向、参与深度
+- 用不同颜色区分用户类型（积极/观望/负面）
+- 下方文字总结：核心用户群体特征是什么
+- 分析用户行为模式和消费偏好
+- 用户情感分布：{sentiment_dist}""",
+
+            'comparison': f"""### 4. 竞品对比雷达图（**最重要**）
+- 使用 ECharts 雷达图展示多维度对比
+- 维度包括：声量、互动率、正面评价率、传播力、关注度
+- 被分析对象 vs 竞品进行直观对比
+- 下方文字总结：各维度的优劣势分析
+- 明确给出竞争建议和改进方向
+- 情感对比数据：{sentiment_dist}""",
+
+            'risk': f"""### 4. 舆情风险评估可视化（**最重要**）
+- 使用 ECharts 仪表盘或饼图展示风险等级
+- 风险维度：负面评价占比、负面词频、传播速度、影响范围
+- 用红色系突出显示高风险区域
+- 下方文字总结：当前风险等级（高危/中危/低危/正常）
+- 分析风险来源和可能的影响
+- 情感分布（重点关注负面）：{sentiment_dist}"""
+        }
+
+        return modules.get(self.report_type, modules['sentiment'])
+
+    def _get_report_modules(self) -> str:
+        """根据报告类型生成完整的模块结构"""
+        fields = self.profile.get("数据结构", {})
+        has_competitors = len(self.profile.get("详细数据", {}).get("competitors", {})) > 0
+
+        # 基础模块（所有报告类型都有）
+        base_modules = """### 1. 核心数据概览
+统计卡片展示：内容数、总点赞、总评论、总播放、平均互动率等
+
+### 2. 执行摘要 (Executive Summary)
+在报告顶部用醒目的样式展示：
+- 核心发现：用1-2句话概括整体态势
+- 关键指标：最重要的3个数据亮点
+- 风险提示：如果有负面评价超过30%，需要醒目提示"""
+
+        # 模块 4（根据报告类型变化）
+        module4 = self._get_module4_content()
+
+        # 热门内容模块（所有报告类型都有）
+        content_module = """### 3. 热门内容 TOP 10 排行榜
+使用上面提供的真实数据，每项展示：
+- 排名、标题、作者
+- 互动数据（点赞/评论/播放）
+- 简短分析为什么这条内容受欢迎"""
+
+        # 热词模块
+        hotword_module = """### 5. 热词综合分析
+- 热词云图：帖子高频词 + 评论高频词
+- 每个热词标注频次"""
+
+        # 评论分析模块（仅舆情类和风险类报告显示）
+        comment_module = ""
+        if self.report_type in ['sentiment', 'risk'] and fields.get("评论内容"):
+            comment_module = """
+### 6. 评论深度分析
+- 用户关注焦点：从评论中提炼出3-5个用户最关心的话题
+- 典型正面评价：引用2-3条真实正面评论
+- 典型负面评价：引用2-3条真实负面评论
+- 高频诉求：用户反复提到的问题或需求"""
+
+        # 洞察建议模块
+        insight_module = """
+### 7. 数据洞察与建议
+基于真实数据生成4-6条洞察，每条包含：
+- 发现：发现了什么现象/问题
+- 依据：引用具体数据或评论作为支撑
+- 建议：应该采取什么行动"""
+
+        # 竞品模块
+        competitor_module = ""
+        if has_competitors:
+            competitor_module = """
+### 8. 竞品对比分析
+- 列出所有在内容中被提及的竞品品牌
+- 展示用户提及竞品的频次和具体上下文
+- 分析用户对竞品的评价
+- 对比分析：品牌 vs 竞品在用户心中的优劣势"""
+
+        # 行动方案模块
+        action_module = """
+### 9. 处理建议与行动方案
+分类给出具体的处理建议：
+- 紧急处理：如果有负面舆情，如何回应
+- 产品优化：基于用户反馈的改进建议
+- 营销方向：应该强化哪些卖点
+- 内容策略：后续应该发什么类型的内容"""
+
+        # 评论展示模块
+        comment_display = ""
+        if fields.get("评论内容"):
+            comment_display = """
+### 10. 代表性用户评论展示区
+展示8-10条代表性评论，包含：
+- 用户名、评论内容、点赞数、情感标签
+- 高亮的购买意向标签（如果评论有购买意向）"""
+
+        # 组装所有模块
+        all_modules = [base_modules, content_module, module4, hotword_module]
+
+        if comment_module:
+            all_modules.append(comment_module)
+
+        all_modules.append(insight_module)
+
+        if competitor_module:
+            all_modules.append(competitor_module)
+
+        all_modules.append(action_module)
+
+        if comment_display:
+            all_modules.append(comment_display)
+
+        return '\n'.join(all_modules)
+
+    def _get_page_theme(self) -> str:
+        """获取页面主题色"""
+        return self.REPORT_TYPE_THEMES.get(self.report_type, '#667eea → #764ba2 (蓝紫色)')
+
+    def _get_analysis_focus(self) -> str:
+        """获取分析重点说明"""
+        focus_map = {
+            'sentiment': """本报告需综合分析以下**四个维度**：
+1. **用户评论内容** - 用户的真实反馈、观点、情感
+2. **评论热度** - 评论的点赞数（反映观点的受欢迎程度）
+3. **帖子内容** - 帖子标题/正文的主题和关键信息
+4. **帖子互动数据** - 点赞、分享、收藏、播放量等""",
+
+            'trend': """本报告重点分析**热度趋势**：
+1. **时间序列分析** - 话题热度随时间的变化规律
+2. **关键节点** - 热度爆发的时间点和触发因素
+3. **内容趋势** - 不同类型内容的热度表现
+4. **未来预测** - 基于历史数据的趋势预判""",
+
+            'volume': """本报告重点分析**声量规模**：
+1. **总量评估** - 内容数、曝光量、互动量的总和
+2. **声源分布** - 不同渠道/账号的声量贡献
+3. **声量质量** - 互动深度 vs 广度
+4. **对比基准** - 与行业平均水平的对比""",
+
+            'keyword': """本报告重点分析**关键词特征**：
+1. **核心词提取** - 高频出现的关键词
+2. **关联词分析** - 词与词之间的关系强度
+3. **情感词识别** - 正面/负面关键词分布
+4. **词云分布** - 关键词的重要性层级""",
+
+            'hot_topics': """本报告重点分析**热门话题**：
+1. **话题发现** - 从内容中聚类出热门话题
+2. **热度排序** - 按讨论量和互动量排序
+3. **话题演变** - 话题的生命周期分析
+4. **用户参与** - 不同话题的用户参与度""",
+
+            'viral_spread': """本报告重点分析**传播规律**：
+1. **传播链路** - 内容从发布到扩散的路径
+2. **关键节点** - 影响传播的关键用户/账号
+3. **传播速度** - 内容扩散的时间特征
+4. **传播模式** - 病毒式/圈层式/线性式""",
+
+            'influencer': """本报告重点分析**影响力账号**：
+1. **账号排序** - 按总互动量排序的TOP账号
+2. **内容特征** - 头部账号的内容策略
+3. **互动质量** - 账号与粉丝的互动深度
+4. **影响力评估** - 账号的舆论引导能力""",
+
+            'audience': """本报告重点分析**用户群体**：
+1. **用户分层** - 按活跃度/情感倾向分层
+2. **行为特征** - 用户的互动行为模式
+3. **需求洞察** - 用户的关注点/痛点/期待
+4. **价值评估** - 不同用户群体的价值贡献""",
+
+            'comparison': """本报告重点分析**竞品对比**：
+1. **多维度对比** - 声量/互动/口碑/传播力
+2. **优劣势分析** - 明确各维度的强弱项
+3. **用户认知** - 用户对不同品牌的印象差异
+4. **竞争策略** - 基于对比结果的策略建议""",
+
+            'risk': """本报告重点分析**舆情风险**：
+1. **负面监测** - 负面评价的数量和占比
+2. **风险来源** - 负面舆情的产生原因
+3. **传播态势** - 负面内容的扩散情况
+4. **预警建议** - 风险等级和应对建议"""
+        }
+
+        return focus_map.get(self.report_type, focus_map['sentiment'])
 
     def build_prompt(self) -> str:
         """构建完整的提示词"""
@@ -483,13 +764,14 @@ class AIReportPromptBuilder:
             'wb': '微博', 'tieba': '百度贴吧', 'zhihu': '知乎'
         }
         platform_name = platform_names.get(self.platform, self.platform)
+        report_type_name = self.REPORT_TYPE_NAMES.get(self.report_type, '舆情分析')
 
         fields = self.profile.get("数据结构", {})
         stats = self.profile.get("数值统计", {})
         content = self.profile.get("内容特征", {})
         detailed_data = self.profile.get("详细数据", {})
 
-        # 构建数据特征描述
+        # 根据报告类型构建数据特征描述
         features_desc = []
         if fields.get("点赞"):
             avg_likes = stats.get("平均值", {}).get("likes", 0)
@@ -517,24 +799,25 @@ class AIReportPromptBuilder:
         has_competitors = len(competitors_data) > 0
         competitors_str = json.dumps(competitors_data, ensure_ascii=False, indent=2) if has_competitors else "{}"
 
-        return f"""请根据以下数据，生成一个专业的舆情分析 HTML 报告，保存到 ./reports/ 目录下。
+        # 获取动态生成的模块内容
+        report_modules = self._get_report_modules()
+        page_theme = self._get_page_theme()
+        analysis_focus = self._get_analysis_focus()
+
+        return f"""请根据以下数据，生成一个专业的{report_type_name} HTML 报告，保存到 ./reports/ 目录下。
 
 ## 数据概况
 - 平台: {platform_name}
 - 关键词: "{self.keywords}"
+- 报告类型: {report_type_name}
 - 数据量: {self.profile.get("总数据量")} 条
 - 互动模式: {self.profile.get("互动模式")}
 - 内容类型: {content.get("内容类型")}
 
 【分析重点要求】
-本报告需综合分析以下**四个维度**（缺一不可）：
+{analysis_focus}
 
-1. **用户评论内容** - 用户的真实反馈、观点、情感
-2. **评论热度** - 评论的点赞数（反映观点的受欢迎程度）
-3. **帖子内容** - 帖子标题/正文的主题和关键信息
-4. **帖子互动数据** - 点赞、分享、收藏、播放量等（反映内容整体热度）
-
-分析时要结合这四个维度：
+分析时要结合多维度：
 - 高赞评论 + 高热度帖子 = 大众共识/爆款话题
 - 高赞评论 + 低热度帖子 = 小众痛点/真实需求
 - 帖子内容引发的高频评论 = 用户关注点
@@ -578,52 +861,23 @@ class AIReportPromptBuilder:
 ```json
 {all_comments}
 ```
+""" + (f"""
+## 从内容中提取的竞品数据
+```json
+{competitors_str}
+```
+""" if has_competitors else "") + f"""
 
 ## 页面风格
-- B站/有播放数据 → 粉紫色渐变 (#ff9a9e → #fecfef)
-- 小红书/有评论 → 蓝紫色渐变 (#667eea → #764ba2)
-- 抖音/快手 → 暖色调 (#ff6b6b → #feca57)
-- 其他 → 清新蓝绿 (#11998e → #38ef7d)
+**必须使用以下主题色**：
+渐变背景: {page_theme}
 
 ## 报告必须包含以下模块 (使用真实数据，严禁编造)：
 
-### 1. 核心数据概览
-统计卡片展示：内容数、总点赞、总评论、总播放、平均互动率等
-
-### 2. 执行摘要 (Executive Summary)
-在报告顶部用醒目的样式展示：
-- 核心发现：用1-2句话概括整体舆情态势（如"整体口碑良好，正面评价占比XX%"）
-- 关键指标：最重要的3个数据亮点
-- 风险提示：如果有负面评价超过30%，需要醒目提示
-
-### 3. 热门内容 TOP 10 排行榜
-使用上面提供的真实数据，每项展示：
-- 排名、标题、作者
-- 互动数据（点赞/评论/播放）
-- 简短分析为什么这条内容受欢迎
-
-### 4. 情感分析可视化（评论内容 + 评论热度 + 帖子互动）
-- 情感分布饼图：基于**用户评论内容**的情感分析
-- 高赞评论的情感权重更高（反映大众情绪）
-- 结合帖子整体点赞/分享数据判断舆论热度
-
-### 5. 热词综合分析（帖子标题 + 用户评论 + 互动数据）
-- 热词云同时展示：帖子高频词 + 评论高频词
-- 不同颜色/标签区分：帖子词 vs 评论词
-- 每个热词标注来源内容的平均互动量
-
-### 6. 评论深度分析
-- 用户关注焦点：从评论中提炼出3-5个用户最关心的话题
-- 典型正面评价：引用2-3条真实正面评论，说明用户喜欢什么
-- 典型负面评价：引用2-3条真实负面评论，说明用户不满什么
-- 高频诉求：用户反复提到的问题或需求
-
-### 7. 竞品对比分析 (根据数据内容决定是否包含)
-"""
-
-        if has_competitors:
-            prompt += f'''
-根据以下从帖子内容和评论中提取的真实竞品数据，生成竞品分析模块：
+{report_modules}
+""" + (f"""
+## 竞品对比分析补充
+根据以下从帖子内容和评论中提取的真实竞品数据，生成竞品分析：
 ```json
 {competitors_str}
 ```
@@ -631,36 +885,20 @@ class AIReportPromptBuilder:
 - 展示用户提及竞品的频次和具体上下文
 - 分析用户对竞品的评价（正面/负面/中性）
 - 对比分析：品牌 vs 竞品在用户心中的优劣势
-'''
 
-        prompt += """
-如果没有竞品数据（上面 JSON 为空），则**完全不要显示这个模块**，直接跳到第8部分。
-
-### 8. 舆情洞察与建议 (非常重要)
-基于真实数据生成4-6条洞察，每条包含：
-- 发现：发现了什么现象/问题
-- 依据：引用具体数据或评论作为支撑
-- 建议：应该采取什么行动
-
-示例格式：
-- 🔍 **发现**：产品体验整体良好，但存在XX问题
-- 📊 **依据**：XX%的评论提到XX，如用户@xxx说："..."
-- 💡 **建议**：建议优化XX功能，加强XX方面的宣传
-
-### 9. 处理建议与行动方案
-分类给出具体的处理建议：
-- 紧急处理：如果有负面舆情，如何回应
-- 产品优化：基于用户反馈的改进建议
-- 营销方向：应该强化哪些卖点
-- 内容策略：后续应该发什么类型的内容
-
-### 10. 代表性用户评论展示区
-展示8-10条代表性评论，包含：
-- 用户名、评论内容、点赞数、情感标签
-- 高亮的购买意向标签（如果评论有购买意向）
+如果没有竞品数据（上面 JSON 为空），则**完全不要显示这个模块**。
+""" if has_competitors else "") + """
 
 ## 设计要求
 1. **所有数据必须来自上面提供的 JSON，严禁编造**
+2. **洞察要具体，必须引用真实评论作为依据**，如"用户 @xxx 在评论中提到'xxx'"
+3. **建议要有可操作性**，不要泛泛而谈
+4. **使用 ECharts 绘制图表**，响应式布局
+5. **中文显示，美观专业，布局宽松舒适**
+6. **每个模块有明显的视觉区分**，使用卡片式设计
+7. **模块4是最重要的可视化模块**，必须使用 ECharts 渲染
+
+请输出完整的、独立的 HTML 代码（包含 CSS 和 JavaScript）。
 2. **洞察要具体，必须引用真实评论作为依据**，如"用户 @xxx 在评论中提到'xxx'"
 3. **建议要有可操作性**，不要泛泛而谈
 4. **使用 ECharts 绘制图表**，响应式布局
@@ -673,7 +911,8 @@ class AIReportPromptBuilder:
 def generate_ai_report_data(
     platform: str,
     keywords: str,
-    data: List[Dict]
+    data: List[Dict],
+    report_type: str = 'sentiment'
 ) -> Dict:
     """
     生成 AI 报告所需的数据结构
@@ -690,7 +929,7 @@ def generate_ai_report_data(
     detailed_data = profiler.get_detailed_data()
     profile["详细数据"] = detailed_data
 
-    prompt_builder = AIReportPromptBuilder(platform, keywords, profile)
+    prompt_builder = AIReportPromptBuilder(platform, keywords, profile, report_type)
     prompt = prompt_builder.build_prompt()
 
     return {
@@ -699,7 +938,8 @@ def generate_ai_report_data(
         "data_summary": {
             "count": len(data),
             "platform": platform,
-            "keywords": keywords
+            "keywords": keywords,
+            "report_type": report_type
         },
         "detailed_data": detailed_data
     }

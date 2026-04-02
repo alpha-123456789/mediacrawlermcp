@@ -590,6 +590,7 @@ async def crawl_media(
     save_data_option: str = "",
     output_path: str = None,
     report_type: str = "sentiment",
+    report_mode: str = "auto",
 ) -> str:
     """
     爬取社交媒体平台帖子、评论数据，并生成舆情分析报告
@@ -608,7 +609,7 @@ async def crawl_media(
 
     Args:
         platform: 平台名称，可选值: xhs, dy, ks, bili, wb, tieba, zhihu
-        crawler_type: 爬取类型，可选值: search(关键词搜索), detail(指定ID详情), creator(创作者主页)
+        crawler_type: 爬取类型，search(关键词搜索)
         keywords: 搜索关键词 (search类型) 或 内容ID (detail类型) 或 创作者ID (creator类型)
         max_count: 返回帖子数量，默认20，范围1-100
         is_get_comments: 是否爬取评论，默认False
@@ -699,13 +700,24 @@ async def crawl_media(
         try:
             platform_name = PLATFORM_NAMES.get(platform, platform)
 
-            # 检查是否配置了 AI API
+  # 检查是否配置了 AI API
             ai_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")
             ai_base_url = os.getenv("ANTHROPIC_BASE_URL") or os.getenv("OPENAI_BASE_URL")
             has_ai_config = bool(ai_api_key and ai_base_url)
 
+            # 确定报告生成模式
+            if report_mode == "script":
+                use_ai = False
+            elif report_mode == "ai":
+                use_ai = has_ai_config
+                if not has_ai_config:
+                    print("警告: 未配置 LLM，回退到脚本模式。请配置 ANTHROPIC_API_KEY 和 ANTHROPIC_BASE_URL")
+            else:
+                # auto 模式：配置了就用AI，否则用脚本
+                use_ai = has_ai_config
+
             # 根据配置选择生成方式
-            if has_ai_config:
+            if use_ai:
                 # AI 增强报告生成
                 from ai_report_generator import generate_ai_report_data
                 from llm_report_generator import generate_report_with_llm
@@ -958,6 +970,7 @@ async def crawl_multi_platform(
     save_data_option: str = "",
     output_path: str = None,
     report_type: str = "sentiment",
+    report_mode: str = "auto",
 ) -> str:
     """
     爬取多个社交媒体平台的帖子、评论数据，并生成统一的舆情分析报告
@@ -1116,14 +1129,24 @@ async def crawl_multi_platform(
                 ensure_ascii=False,
             )
 
+        # 确定报告生成模式
+        ai_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")
+        ai_base_url = os.getenv("ANTHROPIC_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+        has_ai_config = bool(ai_api_key and ai_base_url)
+
+        if report_mode == "script":
+            use_ai = False
+        elif report_mode == "ai":
+            use_ai = has_ai_config
+            if not has_ai_config:
+                print("警告: 未配置 LLM，回退到脚本模式。请配置 ANTHROPIC_API_KEY 和 ANTHROPIC_BASE_URL")
+        else:
+            # auto 模式：配置了就用AI，否则用脚本
+            use_ai = has_ai_config
+
         # 生成统一的舆情分析报告
         try:
-            # 检查是否配置了 AI API
-            ai_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")
-            ai_base_url = os.getenv("ANTHROPIC_BASE_URL") or os.getenv("OPENAI_BASE_URL")
-            has_ai_config = bool(ai_api_key and ai_base_url)
-
-            if has_ai_config:
+            if use_ai:
                 # AI 增强报告生成 - 多平台合并
                 from ai_report_generator import generate_multi_platform_report_data
                 from llm_report_generator import generate_multi_platform_report_with_llm

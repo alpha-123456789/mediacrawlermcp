@@ -851,7 +851,7 @@ class SmartReportGenerator:
                             {{ value: {sentiment_pct.get('negative', 0)}, name: '负面', itemStyle: {{ color: '#f5222d' }} }}
                         ],
                         label: {{
-                            formatter: '{{b}}<br/>{{c}}%'
+                            formatter: '{{b}}\\n{{c}}%'
                         }}
                     }}]
                 }});
@@ -2262,7 +2262,7 @@ class MultiPlatformReportGenerator:
                             {{ value: {sentiment_pct.get('negative', 0)}, name: '负面', itemStyle: {{ color: '#f5222d' }} }}
                         ],
                         label: {{
-                            formatter: '{{b}}<br/>{{c}}%'
+                            formatter: '{{b}}\\n{{c}}%'
                         }}
                     }}]
                 }});

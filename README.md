@@ -220,7 +220,7 @@ LLM_MODEL=deepseek-chat  # 模型名称
 **方式2：Anthropic 原生 API**
 ```bash
 ANTHROPIC_API_KEY=your_api_key
-ANTHROPIC_BASE_URL=https://api.anthropic.com  # 可选
+ANTHROPIC_BASE_URL=https://api.anthropic.com
 ```
 
 **常用模型配置参考：**

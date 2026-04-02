@@ -594,6 +594,9 @@ async def crawl_media(
     """
     爬取社交媒体平台帖子、评论数据，并生成舆情分析报告
 
+    **适用场景：适合单个平台深度分析。如需同时分析多个平台数据进行对比，建议使用 crawl_multi_platform 生成统一对比报告。**
+    **报告输出：每个平台会生成独立的报告文件，多个平台将生成多个报告文件。**
+
     支持平台：
     - xhs: 小红书
     - dy: 抖音
@@ -941,6 +944,292 @@ async def get_crawler_types() -> str:
         },
         ensure_ascii=False,
     )
+
+
+@mcp.tool()
+async def crawl_multi_platform(
+    platforms: List[str],
+    crawler_type: str,
+    keywords: str,
+    max_count: int = 20,
+    is_get_comments: bool = False,
+    is_get_sub_comments: bool = False,
+    max_comments_count: int = 20,
+    save_data_option: str = "",
+    output_path: str = None,
+    report_type: str = "sentiment",
+) -> str:
+    """
+    爬取多个社交媒体平台的帖子、评论数据，并生成统一的舆情分析报告
+
+    **适用场景：适合多平台对比分析，一次调用同时抓取多个平台并生成统一报告。如需为每个平台生成独立报告，请多次调用 crawl_media。**
+    **报告输出：多个平台只生成一个合并的对比报告文件，便于跨平台数据分析。**
+
+    支持平台：
+    - xhs: 小红书
+    - dy: 抖音
+    - ks: 快手
+    - bili: B站 (哔哩哔哩)
+    - wb: 微博
+    - tieba: 百度贴吧
+    - zhihu: 知乎
+
+    Args:
+        platforms: 平台名称列表，例如 ["xhs", "dy", "bili"]
+        crawler_type: 爬取类型，可选值: search(关键词搜索), detail(指定ID详情), creator(创作者主页)
+        keywords: 搜索关键词 (search类型) 或 内容ID (detail类型) 或 创作者ID (creator类型)
+        max_count: 每个平台返回帖子数量，默认20，范围1-100
+        is_get_comments: 是否爬取评论，默认False
+        is_get_sub_comments: 是否爬取子评论，默认False
+        max_comments_count: 返回帖子下评论数量以及每个评论的子评论的数量，默认20，范围0-50
+        save_data_option: 数据存储方式，可选值: ""(不存储), "db"(存储到数据库)，默认""
+        output_path: 报告保存目录，不指定则使用项目根目录下的 reports 文件夹
+        report_type: 报告类型，可选值: "sentiment"(情感分析), "trend"(热门趋势), "hot_topics"(热门话题), "keyword"(关键词分析), "volume"(声量分析), "viral_spread"(传播分析), "influencer"(影响力账号), "audience"(用户画像), "comparison"(竞品对比), "risk"(舆情风险)，默认"sentiment"
+
+    Note:
+        报告生成会自动检测LLM配置：如果配置了 ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY
+        （或 OPENAI_BASE_URL + OPENAI_API_KEY），将使用AI大模型生成高质量报告；
+        否则使用内置脚本生成标准报告。
+
+    Returns:
+        JSON格式的报告结果，包含报告文件路径和分析摘要
+
+    Example:
+        {
+            "status": "success",
+            "platforms": ["xhs", "dy", "bili"],
+            "platform_names": ["小红书", "抖音", "B站"],
+            "keywords": "宝宝巴士",
+            "report_path": "reports/多平台_宝宝巴士_舆情分析报告_20250330_143000.html",
+            "summary": "...",
+            "message": "多平台舆情分析报告已生成"
+        }
+    """
+    try:
+        # 如果未指定输出路径，使用默认报告目录（项目根目录下的 reports）
+        if output_path is None:
+            DEFAULT_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            output_path = str(DEFAULT_REPORTS_DIR)
+
+        # 验证参数
+        valid_platforms = [p.value for p in Platform]
+        for platform in platforms:
+            if platform not in valid_platforms:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "platforms": platforms,
+                        "keywords": keywords,
+                        "message": f"无效的平台 '{platform}'，支持的平台: {', '.join(valid_platforms)}",
+                        "count": 0,
+                    },
+                    ensure_ascii=False,
+                )
+
+        valid_types = [t.value for t in CrawlerType]
+        if crawler_type not in valid_types:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "platforms": platforms,
+                    "keywords": keywords,
+                    "message": f"无效的爬取类型 '{crawler_type}'，支持的类型: {', '.join(valid_types)}",
+                },
+                ensure_ascii=False,
+            )
+
+        if not keywords or not keywords.strip():
+            return json.dumps(
+                {
+                    "status": "error",
+                    "platforms": platforms,
+                    "keywords": keywords,
+                    "message": "关键词不能为空",
+                },
+                ensure_ascii=False,
+            )
+
+        if max_count < 1 or max_count > 100:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "platforms": platforms,
+                    "keywords": keywords,
+                    "message": "max_count 必须在 1-100 之间",
+                },
+                ensure_ascii=False,
+            )
+
+        if max_comments_count < 0 or max_comments_count > 50:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "platforms": platforms,
+                    "keywords": keywords,
+                    "message": "max_comments_count 必须在 0-50 之间",
+                },
+                ensure_ascii=False,
+            )
+
+        # 依次爬取各个平台的数据
+        all_platform_data = {}
+        platform_names = []
+
+        for platform in platforms:
+            try:
+                raw_data = await asyncio.to_thread(
+                    run_crawl_sync,
+                    platform,
+                    crawler_type,
+                    keywords,
+                    max_count,
+                    is_get_comments,
+                    is_get_sub_comments,
+                    max_comments_count,
+                    save_data_option
+                )
+
+                if raw_data:
+                    items = process_platform_data(platform, raw_data)
+                    if items:
+                        all_platform_data[platform] = items
+                        platform_names.append(PLATFORM_NAMES.get(platform, platform))
+            except Exception as e:
+                # 单个平台失败不影响其他平台
+                print(f"平台 {platform} 爬取失败: {e}")
+                continue
+
+        # 数据为空检查
+        if not all_platform_data:
+            return json.dumps(
+                {
+                    "status": "success",
+                    "platforms": platforms,
+                    "keywords": keywords,
+                    "is_get_comments": is_get_comments,
+                    "is_get_sub_comments": is_get_sub_comments,
+                    "max_comments_count": max_comments_count,
+                    "report_path": None,
+                    "summary": "未获取到任何数据",
+                    "message": "未获取到任何数据"
+                },
+                ensure_ascii=False,
+            )
+
+        # 生成统一的舆情分析报告
+        try:
+            # 检查是否配置了 AI API
+            ai_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")
+            ai_base_url = os.getenv("ANTHROPIC_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+            has_ai_config = bool(ai_api_key and ai_base_url)
+
+            if has_ai_config:
+                # AI 增强报告生成 - 多平台合并
+                from ai_report_generator import generate_multi_platform_report_data
+                from llm_report_generator import generate_multi_platform_report_with_llm
+
+                # 1. 准备 AI 报告数据（多平台）
+                ai_data = generate_multi_platform_report_data(
+                    platform_data=all_platform_data,
+                    keywords=keywords,
+                    report_type=report_type
+                )
+
+                # 2. 调用 LLM API 生成多平台报告
+                report_path, summary = await generate_multi_platform_report_with_llm(
+                    platform_data=all_platform_data,
+                    keywords=keywords,
+                    ai_data=ai_data,
+                    output_path=output_path,
+                    report_type=report_type
+                )
+
+                abs_path = os.path.abspath(report_path)
+
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "platforms": list(all_platform_data.keys()),
+                        "platform_names": platform_names,
+                        "crawler_type": crawler_type,
+                        "keywords": keywords,
+                        "is_get_comments": is_get_comments,
+                        "is_get_sub_comments": is_get_sub_comments,
+                        "max_comments_count": max_comments_count,
+                        "report_mode": "ai_enhanced",
+                        "has_ai_config": True,
+                        "report_path": abs_path,
+                        "relative_path": report_path,
+                        "summary": summary,
+                        "total_items": sum(len(items) for items in all_platform_data.values()),
+                        "platform_breakdown": {p: len(items) for p, items in all_platform_data.items()},
+                        "message": f"多平台舆情分析报告已生成: {abs_path}"
+                    },
+                    ensure_ascii=False,
+                )
+            else:
+                # 脚本自动生成报告（多平台合并）
+                from report_generator import generate_multi_platform_report
+
+                report_path, summary, html_content = generate_multi_platform_report(
+                    platform_data=all_platform_data,
+                    keywords=keywords,
+                    output_path=output_path,
+                    report_type=report_type
+                )
+
+                # 转换为绝对路径，便于点击访问
+                abs_path = os.path.abspath(report_path)
+
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "platforms": list(all_platform_data.keys()),
+                        "platform_names": platform_names,
+                        "crawler_type": crawler_type,
+                        "keywords": keywords,
+                        "report_mode": "script",
+                        "has_ai_config": has_ai_config,
+                        "is_get_comments": is_get_comments,
+                        "is_get_sub_comments": is_get_sub_comments,
+                        "max_comments_count": max_comments_count,
+                        "report_path": abs_path,
+                        "relative_path": report_path,
+                        "summary": summary,
+                        "total_items": sum(len(items) for items in all_platform_data.values()),
+                        "platform_breakdown": {p: len(items) for p, items in all_platform_data.items()},
+                        "message": f"多平台舆情分析报告已生成: {abs_path}" +
+                                   (" (未使用AI：请先配置 ANTHROPIC_API_KEY 和 ANTHROPIC_BASE_URL 环境变量)" if not has_ai_config else "")
+                    },
+                    ensure_ascii=False,
+                )
+
+        except Exception as e:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "platforms": platforms,
+                    "keywords": keywords,
+                    "is_get_comments": is_get_comments,
+                    "max_comments_count": max_comments_count,
+                    "message": f"生成报告失败: {str(e)}",
+                },
+                ensure_ascii=False,
+            )
+
+    except Exception as e:
+        return json.dumps(
+            {
+                "status": "error",
+                "platforms": platforms,
+                "crawler_type": crawler_type,
+                "keywords": keywords,
+                "is_get_comments": is_get_comments,
+                "max_comments_count": max_comments_count,
+                "message": f"爬取失败: {str(e)}",
+            },
+            ensure_ascii=False,
+        )
 
 
 # =========================

@@ -119,12 +119,29 @@ result = await crawl_media(
 # 可直接点击 report_path 打开
 ```
 
-### 场景3：竞品对比分析（多平台）
+### 场景3：竞品对比分析（多平台合并报告）⭐ 推荐
 ```python
-# 分别分析B站和抖音上的同一品牌
-bili_result = await crawl_media(platform="bili", keywords="宝宝巴士")
-dy_result = await crawl_media(platform="dy", keywords="宝宝巴士")
+# 同时抓取多个平台，生成一个统一的合并报告
+result = await crawl_multi_platform(
+    platforms=["bili", "dy", "xhs"],  # 同时抓取B站、抖音、小红书
+    crawler_type="search",
+    keywords="宝宝巴士",
+    max_count=20,
+    is_get_comments=True,
+    max_comments_count=10
+)
+# 生成一个包含所有平台数据的统一报告
+print(result["platforms"])       # ["bili", "dy", "xhs"]
+print(result["platform_names"])  # ["B站", "抖音", "小红书"]
+print(result["summary"])         # 多平台综合分析摘要
 ```
+
+**多平台报告特点：**
+- 一个报告包含所有平台数据，便于对比分析
+- 展示各平台数据分布比例
+- 跨平台热词統一分析
+- 各平台情感倾向对比
+- 分平台内容策略建议
 
 ### 场景4：使用脚本生成（静态模板）
 ```python
@@ -135,6 +152,42 @@ result = await crawl_media(
     report_mode="script"  # "用脚本生成"、"静态报告"、"统一格式"
 )
 print(result["report_path"])  # 直接返回 HTML 文件路径
+```
+
+## 多平台抓取：`crawl_multi_platform` 工具
+
+**当有对比多个平台数据需求时，使用此工具生成统一报告**
+
+```
+crawl_multi_platform(
+    platforms=["xhs", "dy", "bili"],  # 平台列表
+    crawler_type="search",           # 类型: search/detail/creator
+    keywords="宝宝巴士",            # 搜索关键词
+    max_count=20,                    # 每个平台爬取数量
+    is_get_comments=true,            # 是否获取评论
+    max_comments_count=10,           # 每条评论数
+    output_path="reports"            # 报告输出目录
+)
+```
+
+**返回数据结构：**
+```json
+{
+    "status": "success",
+    "platforms": ["xhs", "dy", "bili"],
+    "platform_names": ["小红书", "抖音", "B站"],
+    "keywords": "宝宝巴士",
+    "report_mode": "ai_enhanced",
+    "report_path": ".../多平台_宝宝巴士_舆情分析报告_xxx.html",
+    "summary": "多平台综合分析摘要...",
+    "total_items": 60,
+    "platform_breakdown": {
+        "xhs": 20,
+        "dy": 20,
+        "bili": 20
+    },
+    "message": "多平台舆情分析报告已生成: ..."
+}
 ```
 
 ## 生成的报告内容

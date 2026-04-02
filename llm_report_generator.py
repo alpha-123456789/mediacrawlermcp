@@ -444,3 +444,126 @@ def generate_summary(
                 summary_parts.append(f"🔥 热门讨论：{', '.join(top_words)}")
 
     return "\n".join(summary_parts)
+
+
+# =========================
+# 多平台报告生成
+# =========================
+
+async def generate_multi_platform_report_with_llm(
+    platform_data,
+    keywords,
+    ai_data,
+    output_path,
+    report_type="sentiment"
+):
+    """
+    使用 LLM 生成多平台合并报告
+    """
+    prompt = ai_data["prompt"]
+    profile = ai_data.get("profile", {})
+    detailed_data = ai_data.get("detailed_data", {})
+
+    # 平台名称映射
+    platform_names = {
+        'xhs': '小红书', 'dy': '抖音', 'ks': '快手', 'bili': 'B站',
+        'wb': '微博', 'tieba': '百度贴吧', 'zhihu': '知乎'
+    }
+    platforms_str = ', '.join([platform_names.get(p, p) for p in platform_data.keys()])
+
+    # 报告类型名称映射
+    report_type_names = {
+        'sentiment': '舆情分析', 'trend': '热门趋势', 'volume': '声量分析',
+        'keyword': '关键词分析', 'hot_topics': '热门话题', 'viral_spread': '传播分析',
+        'influencer': '影响力账号', 'audience': '用户画像',
+        'comparison': '竞品对比', 'risk': '舆情风险'
+    }
+    report_type_name = report_type_names.get(report_type, '舆情分析')
+
+    # 调用 LLM 生成报告
+    html_content = await call_llm(prompt)
+
+    # 准备保存路径
+    output_dir = Path(output_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # 生成文件名
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_kw = "".join(c if c.isalnum() or c in '-_ ' else '_' for c in keywords)
+    safe_kw = safe_kw.strip()
+
+    filename = f"多平台_{safe_kw}_{report_type_name}_{timestamp}.html"
+    report_path = output_dir / filename
+
+    # 保存 HTML 文件
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    # 生成多平台摘要
+    summary = generate_multi_platform_summary(profile, detailed_data, platforms_str, keywords, report_type, report_type_name)
+
+    return str(report_path), summary
+
+
+def generate_multi_platform_summary(profile, detailed_data, platforms_str, keywords, report_type, report_type_name):
+    """生成多平台报告摘要"""
+    total_items = profile.get("总数据量", 0)
+    stats = profile.get("数值统计", {}).get("总量", {})
+    platform_stats = profile.get("平台分布", {})
+    sentiment_dist = detailed_data.get("sentiment_distribution", [])
+
+    # 平台名称映射
+    platform_names = {
+        'xhs': '小红书', 'dy': '抖音', 'ks': '快手', 'bili': 'B站',
+        'wb': '微博', 'tieba': '百度贴吧', 'zhihu': '知乎'
+    }
+
+    summary_parts = [
+        f"📊 多平台「{keywords}」{report_type_name}报告",
+        f"🌐 覆盖平台：{platforms_str}",
+        f"📈 总数据量：{total_items} 条内容",
+    ]
+
+    # 各平台分布
+    if platform_stats:
+        summary_parts.append("📊 平台分布：")
+        for platform, count in sorted(platform_stats.items(), key=lambda x: x[1], reverse=True):
+            platform_name = platform_names.get(platform, platform)
+            summary_parts.append(f"   • {platform_name}: {count}条")
+
+    # 互动数据
+    if stats.get('likes', 0) > 0:
+        summary_parts.append(f"❤️ 总点赞: {stats.get('likes', 0)}")
+    if stats.get('comments', 0) > 0:
+        summary_parts.append(f"💬 总评论: {stats.get('comments', 0)}")
+    if stats.get('views', 0) > 0:
+        summary_parts.append(f"👁️ 总播放: {stats.get('views', 0)}")
+
+    # 情感分析
+    if sentiment_dist:
+        positive = 0
+        negative = 0
+        neutral = 0
+        for item in sentiment_dist:
+            if isinstance(item, dict):
+                name = item.get("name", "")
+                value = item.get("value", 0)
+                if name == "正面":
+                    positive = value
+                elif name == "负面":
+                    negative = value
+                elif name == "中性":
+                    neutral = value
+
+        summary_parts.append(
+            f"💭 情感分布：正面 {positive:.1f}% | 负面 {negative:.1f}% | 中性 {neutral:.1f}%"
+        )
+
+    # 热词
+    hot_words = detailed_data.get("hot_words", [])
+    if hot_words:
+        top_words = [w.get("name", "") for w in hot_words[:5] if isinstance(w, dict)]
+        if top_words:
+            summary_parts.append(f"🔥 热门讨论：{', '.join(top_words)}")
+
+    return "\n".join(summary_parts)

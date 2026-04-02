@@ -943,3 +943,352 @@ def generate_ai_report_data(
         },
         "detailed_data": detailed_data
     }
+
+
+# =========================
+# 多平台合并报告支持
+# =========================
+
+class MultiPlatformDataProfiler:
+    """多平台数据特征分析器"""
+
+    def __init__(self, platform_data: Dict[str, List[Dict]]):
+        self.platform_data = platform_data
+        # 合并所有数据
+        self.all_data = []
+        for platform, data in platform_data.items():
+            for item in data:
+                item['_platform'] = platform
+                self.all_data.append(item)
+
+        self.detector = AutoFieldDetector()
+        self.field_map = self.detector.detect_from_data_list(self.all_data)
+
+    def analyze(self) -> Dict:
+        """生成多平台合并的数据画像"""
+        if not self.all_data:
+            return {"error": "没有数据"}
+
+        # 平台统计
+        platform_stats = {p: len(d) for p, d in self.platform_data.items()}
+
+        # 数值统计
+        numeric_stats = self._calculate_stats()
+
+        # 内容分析
+        content_analysis = self._analyze_content()
+
+        # 情感分析
+        sentiment_stats = self._analyze_sentiment()
+
+        # 各平台详细数据
+        platform_details = {}
+        for platform, data in self.platform_data.items():
+            if data:
+                profiler = DataProfiler(data)
+                platform_details[platform] = profiler.get_detailed_data()
+
+        return {
+            "总数据量": len(self.all_data),
+            "平台数量": len(self.platform_data),
+            "平台分布": platform_stats,
+            "数值统计": numeric_stats,
+            "内容特征": content_analysis,
+            "情感统计": sentiment_stats,
+            "平台详细数据": platform_details
+        }
+
+    def _calculate_stats(self) -> Dict:
+        """计算数值统计"""
+        stats = {"likes": 0, "comments": 0, "views": 0, "shares": 0}
+
+        for item in self.all_data:
+            stats["likes"] += get_standardized_value(item, self.field_map, "likes")
+            stats["comments"] += get_standardized_value(item, self.field_map, "comments")
+            stats["views"] += get_standardized_value(item, self.field_map, "views")
+            stats["shares"] += get_standardized_value(item, self.field_map, "shares")
+
+        total = len(self.all_data)
+        return {
+            "总量": stats,
+            "平均值": {k: round(v/total, 1) if total else 0 for k, v in stats.items()},
+        }
+
+    def _analyze_content(self) -> Dict:
+        """分析内容特征"""
+        # 提取跨平台热词
+        all_text = []
+        for item in self.all_data:
+            text = item.get('desc', '') or item.get('title', '') or item.get('caption', '')
+            if text:
+                all_text.append(text)
+            for comment in item.get('comments', []):
+                content = comment.get('content', '') if isinstance(comment, dict) else str(comment)
+                if content:
+                    all_text.append(content)
+
+        if not all_text:
+            return {"热词": []}
+
+        full_text = ' '.join(all_text)
+        keywords = jieba.analyse.extract_tags(full_text, topK=30, withWeight=True)
+        hot_words = [{"name": word, "value": int(weight * 1000)} for word, weight in keywords]
+
+        return {
+            "热词": hot_words[:20],
+            "内容类型": "跨平台综合分析"
+        }
+
+    def _analyze_sentiment(self) -> Dict:
+        """分析情感分布"""
+        sentiments = {'positive': 0, 'negative': 0, 'neutral': 0}
+
+        for item in self.all_data:
+            text = item.get('desc', '') or item.get('title', '') or item.get('caption', '')
+            if text:
+                sentiment, _ = self._analyze_text_sentiment(text)
+                sentiments[sentiment] += 1
+
+            for comment in item.get('comments', []):
+                content = comment.get('content', '') if isinstance(comment, dict) else str(comment)
+                if content:
+                    sentiment, _ = self._analyze_text_sentiment(content)
+                    sentiments[sentiment] += 1
+
+        total = sum(sentiments.values())
+        if total > 0:
+            return {
+                "分布": {k: round(v/total*100, 1) for k, v in sentiments.items()},
+                "总数": sentiments
+            }
+        return {"分布": {}, "总数": sentiments}
+
+    def _analyze_text_sentiment(self, text: str):
+        """简单情感分析"""
+        positive_words = {'好', '棒', '优秀', '喜欢', '爱', '赞', '推荐', '满意', '不错', '值得'}
+        negative_words = {'差', '烂', '糟', '坏', '失望', '后悔', '垃圾', '坑', '差评'}
+
+        pos_count = sum(1 for word in positive_words if word in text)
+        neg_count = sum(1 for word in negative_words if word in text)
+
+        if pos_count > neg_count:
+            return 'positive', 0.7
+        elif neg_count > pos_count:
+            return 'negative', 0.7
+        return 'neutral', 0.5
+
+    def get_detailed_data(self) -> Dict:
+        """获取详细的多平台数据"""
+        # 获取代表性评论
+        all_comments = []
+        for platform, data in self.platform_data.items():
+            for item in data:
+                for comment in item.get('comments', []):
+                    if isinstance(comment, dict):
+                        content = comment.get('content', '')
+                        if len(content) > 10:
+                            all_comments.append({
+                                "content": content[:300],
+                                "author": comment.get('comment_nickname', '匿名'),
+                                "platform": platform,
+                                "likes": comment.get('like_count', 0)
+                            })
+
+        all_comments.sort(key=lambda x: x['likes'], reverse=True)
+
+        # 获取各平台TOP内容
+        platform_top_contents = {}
+        for platform, data in self.platform_data.items():
+            top_contents = []
+            for item in data[:5]:
+                if isinstance(item, dict):
+                    likes = get_standardized_value(item, self.field_map, "likes")
+                    comments = get_standardized_value(item, self.field_map, "comments")
+                    views = get_standardized_value(item, self.field_map, "views")
+
+                    top_contents.append({
+                        "title": (item.get('title') or item.get('desc', '') or item.get('caption', ''))[:100],
+                        "author": item.get('nickname', '匿名'),
+                        "likes": likes,
+                        "comments": comments,
+                        "views": views
+                    })
+            platform_top_contents[platform] = top_contents
+
+        # 情感分布
+        sentiment_stats = self._analyze_sentiment()
+        sentiment_distribution = [
+            {"value": v, "name": {"positive": "正面", "negative": "负面", "neutral": "中性"}.get(k, k)}
+            for k, v in sentiment_stats["分布"].items()
+        ]
+
+        # 热词
+        content_analysis = self._analyze_content()
+
+        return {
+            "representative_comments": all_comments[:20],
+            "platform_top_contents": platform_top_contents,
+            "sentiment_distribution": sentiment_distribution,
+            "hot_words": content_analysis.get("热词", [])
+        }
+
+
+def generate_multi_platform_report_data(
+    platform_data: Dict[str, List[Dict]],
+    keywords: str,
+    report_type: str = 'sentiment'
+) -> Dict:
+    """
+    生成多平台 AI 报告所需的数据结构
+
+    Args:
+        platform_data: {平台代码: 数据列表} 的字典
+        keywords: 关键词
+        report_type: 报告类型
+
+    Returns:
+        包含提示词和数据画像的字典
+    """
+    profiler = MultiPlatformDataProfiler(platform_data)
+    profile = profiler.analyze()
+    detailed_data = profiler.get_detailed_data()
+
+    # 构建多平台提示词
+    platform_names = {
+        'xhs': '小红书', 'dy': '抖音', 'ks': '快手', 'bili': 'B站',
+        'wb': '微博', 'tieba': '百度贴吧', 'zhihu': '知乎'
+    }
+    platforms_str = ', '.join([platform_names.get(p, p) for p in platform_data.keys()])
+
+    report_type_names = {
+        'sentiment': '舆情分析', 'trend': '热门趋势', 'volume': '声量分析',
+        'keyword': '关键词分析', 'hot_topics': '热门话题', 'viral_spread': '传播分析',
+        'influencer': '影响力账号', 'audience': '用户画像',
+        'comparison': '竞品对比', 'risk': '舆情风险'
+    }
+    report_type_name = report_type_names.get(report_type, '舆情分析')
+
+    # 统计数据
+    stats = profile.get("数值统计", {})
+    totals = stats.get("总量", {})
+    platform_stats = profile.get("平台分布", {})
+
+    # TOP内容
+    platform_top_contents = detailed_data.get("platform_top_contents", {})
+    top_contents_str = json.dumps(platform_top_contents, ensure_ascii=False, indent=2)
+
+    # 热词
+    hot_words = detailed_data.get("hot_words", [])
+    hot_words_str = json.dumps(hot_words, ensure_ascii=False, indent=2)
+
+    # 情感分布
+    sentiment_dist = json.dumps(detailed_data.get("sentiment_distribution", []), ensure_ascii=False)
+
+    # 代表性评论
+    comments_str = json.dumps(detailed_data.get("representative_comments", [])[:15], ensure_ascii=False, indent=2)
+
+    # 构建多平台专用提示词
+    prompt = f"""请根据以下多平台数据，生成一个专业的跨平台{report_type_name} HTML 报告。
+
+## 数据概况
+- 关键词: "{keywords}"
+- 报告类型: {report_type_name}
+- 覆盖平台: {platforms_str}
+- 总数据量: {profile.get("总数据量")} 条
+- 平台分布: {json.dumps({platform_names.get(p, p): c for p, c in platform_stats.items()}, ensure_ascii=False)}
+
+## 跨平台统计数据
+- 总点赞: {totals.get('likes', 0)}
+- 总评论: {totals.get('comments', 0)}
+- 总播放: {totals.get('views', 0)}
+- 总分享: {totals.get('shares', 0)}
+- 平均点赞: {stats.get('平均值', {}).get('likes', 0)}
+
+## 各平台热门内容 TOP 5
+```json
+{top_contents_str}
+```
+
+## 跨平台热词分析
+```json
+{hot_words_str}
+```
+
+## 情感分布统计
+```json
+{sentiment_dist}
+```
+
+## 代表性评论 (跨平台精选)
+```json
+{comments_str}
+```
+
+## 报告必须包含以下模块：
+
+### 1. 平台数据分布概览
+- 各平台内容数量对比（柱状图）
+- 各平台占比分析
+
+### 2. 核心数据概览
+- 统计卡片：总内容数、总点赞、总评论、覆盖平台数
+- 跨平台互动数据对比
+
+### 3. 平台差异化分析
+- 各平台用户特征差异
+- 不同平台的内容热度差异
+- 各平台情感倾向对比（如有评论数据）
+
+### 4. 情感分析可视化（**最重要**）
+- 使用 ECharts 饼图展示整体情感分布
+- 如果有各平台评论数据，增加各平台情感对比柱状图
+
+### 5. 跨平台热门内容排行
+- 展示各平台TOP热门内容
+- 标注平台来源
+- 跨平台内容热度对比分析
+
+### 6. 热词云图（**最重要**）
+- 使用 ECharts 词云图展示所有平台的综合热词
+- 标注热词在所有平台的关注度
+
+### 7. 跨平台洞察与建议
+生成4-6条跨平台洞察，每条包含：
+- 发现：发现了什么跨平台现象/规律
+- 依据：引用具体数据支撑
+- 建议：应该采取什么行动
+
+### 8. 分平台处理建议
+针对每个平台给出具体的运营建议：
+- 各平台内容策略建议
+- 各平台互动优化建议
+- 各平台舆情监控重点
+
+### 9. 代表性评论展示
+按平台分组展示代表性评论（每个平台2-3条）
+
+## 页面风格
+**必须使用多平台综合主题色**：
+渐变背景: linear-gradient(135deg, #667eea 0%, #764ba2 100%) (蓝紫色渐变)
+
+## 设计要求
+1. **所有数据必须来自上面提供的 JSON，严禁编造**
+2. **强调跨平台对比分析**，不是简单罗列各平台数据
+3. **洞察要有跨平台视角**，例如"抖音以视频播放为主，小红书以种草评论见长"
+4. **使用 ECharts 绘制图表**，响应式布局
+5. **中文显示，美观专业**
+6. **多平台数据要有明确的平台标识**（使用平台logo或名称）
+
+请输出完整的、独立的 HTML 代码（包含 CSS 和 JavaScript）。"""
+
+    return {
+        "prompt": prompt,
+        "profile": profile,
+        "detailed_data": detailed_data,
+        "data_summary": {
+            "platforms": list(platform_data.keys()),
+            "total_count": len(profiler.all_data),
+            "keywords": keywords,
+            "report_type": report_type
+        }
+    }

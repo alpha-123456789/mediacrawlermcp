@@ -1925,3 +1925,827 @@ def generate_report_content(
     summary = generator.get_console_summary()
     html_content = generator.generate_html()
     return summary, html_content
+
+
+# =========================
+# 多平台合并报告生成器
+# =========================
+
+class MultiPlatformReportGenerator:
+    """多平台合并报告生成器 - 合并多个平台数据生成统一报告"""
+
+    PLATFORM_NAMES = {
+        'xhs': '小红书',
+        'dy': '抖音',
+        'ks': '快手',
+        'bili': 'B站',
+        'wb': '微博',
+        'tieba': '百度贴吧',
+        'zhihu': '知乎'
+    }
+
+    PLATFORM_ICONS = {
+        'xhs': '📕',
+        'dy': '🎵',
+        'ks': '📱',
+        'bili': '📺',
+        'wb': '🌐',
+        'tieba': '📌',
+        'zhihu': '💡',
+    }
+
+    REPORT_TYPE_NAMES = {
+        'sentiment': '舆情分析',
+        'trend': '热门趋势',
+        'hot_topics': '热门话题',
+        'keyword': '关键词分析',
+        'volume': '声量分析',
+        'viral_spread': '传播分析',
+        'influencer': '影响力账号',
+        'audience': '用户画像',
+        'comparison': '竞品对比',
+        'risk': '舆情风险',
+        'auto': '智能分析',
+    }
+
+    def __init__(
+        self,
+        platform_data: Dict[str, List[Dict]],
+        keywords: str,
+        output_path: str = "reports",
+        report_type: str = "sentiment"
+    ):
+        """
+        初始化多平台报告生成器
+
+        Args:
+            platform_data: {平台代码: 数据列表} 的字典
+            keywords: 搜索关键词
+            output_path: 输出路径
+            report_type: 报告类型
+        """
+        self.platform_data = platform_data
+        self.keywords = keywords
+        self.output_path = output_path
+        self.report_type = report_type
+
+        # 合并所有平台数据用于分析
+        self.all_data = []
+        self.platform_stats = {}
+        self._merge_platform_data()
+
+        # 使用合并后的数据进行特征分析
+        self.analyzer = DataAnalyzer(self.all_data)
+        self.profile = self.analyzer.get_data_profile()
+        self.features = self.profile['features']
+
+        # 缓存分析结果
+        self.sentiment_stats = {'positive': 0, 'negative': 0, 'neutral': 0}
+        self.hot_words = []
+
+    def _merge_platform_data(self):
+        """合并多平台数据并统计各平台数据量"""
+        for platform, data in self.platform_data.items():
+            if data:
+                # 为每条数据添加平台标记
+                for item in data:
+                    item['_platform'] = platform
+                self.all_data.extend(data)
+                self.platform_stats[platform] = len(data)
+
+    def _analyze_sentiment(self) -> Dict:
+        """分析所有数据的情感分布"""
+        sentiments = {'positive': 0, 'negative': 0, 'neutral': 0}
+
+        for item in self.all_data:
+            # 分析内容情感
+            text = item.get('desc', '') or item.get('title', '') or item.get('caption', '')
+            if text:
+                sentiment, _ = SentimentAnalyzer.analyze(text)
+                sentiments[sentiment] += 1
+
+            # 分析评论情感
+            for comment in item.get('comments', []):
+                comment_text = comment.get('content', '')
+                if comment_text:
+                    sentiment, _ = SentimentAnalyzer.analyze(comment_text)
+                    sentiments[sentiment] += 1
+
+        self.sentiment_stats = sentiments
+        total = sum(sentiments.values())
+        if total > 0:
+            return {k: round(v / total * 100, 1) for k, v in sentiments.items()}
+        return sentiments
+
+    def _extract_hot_words(self) -> List[Tuple[str, int]]:
+        """提取所有数据的热词"""
+        all_text = []
+
+        for item in self.all_data:
+            text = item.get('desc', '') or item.get('title', '') or item.get('caption', '')
+            if text:
+                all_text.append(text)
+
+            for comment in item.get('comments', []):
+                content = comment.get('content', '')
+                if content:
+                    all_text.append(content)
+
+        if not all_text:
+            return []
+
+        full_text = ' '.join(all_text)
+        keywords = jieba.analyse.extract_tags(full_text, topK=30, withWeight=True)
+        hot_words = [(word, int(weight * 1000)) for word, weight in keywords]
+        self.hot_words = hot_words[:20]
+        return self.hot_words
+
+    def _get_representative_comments(self) -> List[Dict]:
+        """获取所有平台的代表性评论"""
+        comments = []
+
+        for item in self.all_data:
+            platform = item.get('_platform', '')
+            for comment in item.get('comments', []):
+                content = comment.get('content', '')
+                if len(content) > 10 and len(content) < 300:
+                    sentiment, score = SentimentAnalyzer.analyze(content)
+                    comments.append({
+                        'content': content,
+                        'sentiment': sentiment,
+                        'score': score,
+                        'like_count': comment.get('like_count', 0),
+                        'nickname': comment.get('comment_nickname', '') or comment.get('user_nickname', ''),
+                        'platform': platform,
+                        'has_intent': SentimentAnalyzer.has_purchase_intent(content)
+                    })
+
+        comments.sort(key=lambda x: (x['has_intent'], x['like_count']), reverse=True)
+        return comments[:15]
+
+    def _format_number(self, num: int) -> str:
+        if num >= 10000:
+            return f"{num / 10000:.1f}万"
+        return str(num)
+
+    def _get_platform_breakdown(self) -> str:
+        """生成各平台数据分布HTML"""
+        html = '<div class="platform-breakdown" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">'
+
+        total = sum(self.platform_stats.values())
+        for platform, count in sorted(self.platform_stats.items(), key=lambda x: x[1], reverse=True):
+            platform_name = self.PLATFORM_NAMES.get(platform, platform)
+            icon = self.PLATFORM_ICONS.get(platform, '📊')
+            percentage = round(count / total * 100, 1) if total > 0 else 0
+
+            html += f'''
+            <div style="background: rgba(102,126,234,0.1); padding: 15px; border-radius: 12px; text-align: center;">
+                <div style="font-size: 1.5em; margin-bottom: 5px;">{icon}</div>
+                <div style="font-weight: 600; color: #333;">{platform_name}</div>
+                <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{count}条 ({percentage}%)</div>
+            </div>
+            '''
+
+        html += '</div>'
+        return html
+
+    def _generate_metric_cards(self) -> str:
+        """生成多平台的综合指标卡片"""
+        cards = []
+        profile = self.profile
+        totals = profile['totals']
+
+        # 基础卡片：内容数
+        cards.append({
+            'icon': '📊',
+            'value': str(len(self.all_data)),
+            'label': '分析内容总数'
+        })
+
+        # 统计平台数
+        cards.append({
+            'icon': '🌐',
+            'value': str(len(self.platform_data)),
+            'label': '覆盖平台数'
+        })
+
+        # 根据特征添加卡片
+        if self.features.get('has_likes'):
+            cards.append({
+                'icon': '❤️',
+                'value': self._format_number(totals['likes']),
+                'label': '总点赞数'
+            })
+
+        if self.features.get('has_comments'):
+            cards.append({
+                'icon': '💬',
+                'value': self._format_number(totals['comments']),
+                'label': '评论总数'
+            })
+
+        if self.features.get('has_views'):
+            cards.append({
+                'icon': '👁️',
+                'value': self._format_number(totals['views']),
+                'label': '总播放量'
+            })
+
+        if self.features.get('has_shares'):
+            cards.append({
+                'icon': '🚀',
+                'value': self._format_number(totals['shares']),
+                'label': '分享次数'
+            })
+
+        # 如果有评论数据，添加情感分析卡片
+        if self.features.get('has_comment_data'):
+            sentiment_pct = self._analyze_sentiment()
+            cards.append({
+                'icon': '👍',
+                'value': f"{sentiment_pct.get('positive', 0)}%",
+                'label': '正面评价'
+            })
+
+        # 生成HTML
+        html = '<div class="metric-grid">'
+        for card in cards:
+            html += f'''
+            <div class="metric-card">
+                <div class="metric-icon">{card['icon']}</div>
+                <div class="metric-value">{card['value']}</div>
+                <div class="metric-label">{card['label']}</div>
+            </div>
+            '''
+        html += '</div>'
+        return html
+
+    def _generate_platform_content_list(self) -> str:
+        """生成各平台热门内容列表"""
+        items = []
+
+        # 按平台分类展示TOP3
+        for platform, data in self.platform_data.items():
+            platform_name = self.PLATFORM_NAMES.get(platform, platform)
+            for i, item in enumerate(data[:3], 1):  # 每个平台取TOP3
+                interact = item.get('interact_info', {})
+
+                # 获取标题
+                title = item.get('title', item.get('desc', item.get('caption', '无标题')))[:50]
+
+                # 获取作者
+                author = item.get('nickname', item.get('author', '匿名'))[:10]
+
+                # 构建统计信息
+                stats = []
+                likes = interact.get('like_count', 0) or interact.get('digg_count', 0) or 0
+                if likes:
+                    stats.append(f"❤️ {self._format_number(likes)}")
+
+                views = interact.get('view_count', 0) or interact.get('play_count', 0) or 0
+                if views:
+                    stats.append(f"👁️ {self._format_number(views)}")
+
+                comments = interact.get('comment_count', 0) or interact.get('comments_count', 0) or 0
+                if comments:
+                    stats.append(f"💬 {self._format_number(comments)}")
+
+                items.append({
+                    'platform': platform_name,
+                    'platform_color': '#667eea',
+                    'rank': i,
+                    'title': title,
+                    'author': author,
+                    'stats': ' | '.join(stats) if stats else ''
+                })
+
+        html = '<div class="content-list">'
+        for item in items:
+            html += f'''
+            <div class="content-item">
+                <div class="content-rank" style="background: {item['platform_color']}; color: white; font-size: 0.7em;">
+                    {item['platform'][:2]}\n#{item['rank']}
+                </div>
+                <div class="content-info">
+                    <div class="content-title">{item['title']}</div>
+                    <div class="content-meta">👤 {item['author']}</div>
+                </div>
+                <div class="content-stats">{item['stats']}</div>
+            </div>
+            '''
+        html += '</div>'
+        return html
+
+    def _generate_sentiment_chart(self) -> str:
+        """生成情感分析图表"""
+        if not self.features.get('has_comment_data', False) and len(self.all_data) < 5:
+            return ''
+
+        sentiment_pct = self._analyze_sentiment()
+
+        return f'''
+        <div class="section">
+            <div class="section-title">📊 情感分析分布</div>
+            <div class="chart-container" id="sentimentChart" style="height: 280px;"></div>
+            <script>
+                var chart = echarts.init(document.getElementById('sentimentChart'));
+                chart.setOption({{
+                    tooltip: {{ trigger: 'item', formatter: '{{b}}: {{c}}%' }},
+                    legend: {{ bottom: '5%', left: 'center' }},
+                    series: [{{
+                        type: 'pie',
+                        radius: ['40%', '70%'],
+                        center: ['50%', '45%'],
+                        data: [
+                            {{ value: {sentiment_pct.get('positive', 0)}, name: '正面', itemStyle: {{ color: '#52c41a' }} }},
+                            {{ value: {sentiment_pct.get('neutral', 0)}, name: '中性', itemStyle: {{ color: '#faad14' }} }},
+                            {{ value: {sentiment_pct.get('negative', 0)}, name: '负面', itemStyle: {{ color: '#f5222d' }} }}
+                        ],
+                        label: {{
+                            formatter: '{{b}}<br/>{{c}}%'
+                        }}
+                    }}]
+                }});
+            </script>
+        </div>
+        '''
+
+    def _generate_hot_words(self) -> str:
+        """生成热词云"""
+        hot_words = self._extract_hot_words()
+
+        if not hot_words:
+            return '<div class="word-cloud"><span style="color: #999;">暂无足够文本数据生成热词</span></div>'
+
+        max_count = max(w[1] for w in hot_words)
+        colors = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe', '#11998e', '#38ef7d', '#ffd93d']
+
+        html = '<div class="word-cloud">'
+        for i, (word, count) in enumerate(hot_words[:20]):
+            size_class = min(5, max(1, int(count / max_count * 5)))
+            color = colors[i % len(colors)]
+            html += f'<span class="word-tag size-{size_class}" style="background: {color}20; color: {color};">{word}</span>'
+        html += '</div>'
+        return html
+
+    def _generate_insights(self) -> str:
+        """生成多平台数据洞察"""
+        insights = []
+        profile = self.profile
+
+        # 数据覆盖度洞察
+        if len(self.platform_data) >= 3:
+            insights.append({
+                'icon': '🌐',
+                'title': '多平台声量覆盖',
+                'content': f'共覆盖{len(self.platform_data)}个平台，采集{len(self.all_data)}条内容，数据覆盖全面。'
+            })
+
+        # 平台分布洞察
+        max_platform = max(self.platform_stats.items(), key=lambda x: x[1])
+        max_platform_name = self.PLATFORM_NAMES.get(max_platform[0], max_platform[0])
+        insights.append({
+            'icon': '📈',
+            'title': '主要声量来源',
+            'content': f'{max_platform_name}贡献了最多的讨论内容（{max_platform[1]}条），是该话题的主要讨论阵地。'
+        })
+
+        # 互动数据洞察
+        if self.features.get('has_likes') and profile['averages']['likes'] > 1000:
+            insights.append({
+                'icon': '🔥',
+                'title': '高互动内容',
+                'content': f'平均每条内容获得{profile["averages"]["likes"]:.0f}点赞，整体热度较高。'
+            })
+
+        # 情感洞察
+        if self.features.get('has_comment_data'):
+            sentiment_pct = self._analyze_sentiment()
+            if sentiment_pct.get('positive', 0) > 60:
+                insights.append({
+                    'icon': '👍',
+                    'title': '口碑良好',
+                    'content': f'{sentiment_pct["positive"]}%的评论呈正面倾向，跨平台用户满意度较高。'
+                })
+            elif sentiment_pct.get('negative', 0) > 30:
+                insights.append({
+                    'icon': '⚠️',
+                    'title': '需要关注',
+                    'content': f'{sentiment_pct["negative"]}%的评论呈负面倾向，建议关注用户反馈。'
+                })
+
+        html = '<div class="insight-list">'
+        for insight in insights:
+            html += f'''
+            <div class="insight-item">
+                <div class="insight-title">{insight['icon']} {insight['title']}</div>
+                <div class="insight-content">{insight['content']}</div>
+            </div>
+            '''
+        html += '</div>'
+        return html
+
+    def _generate_comments_section(self) -> str:
+        """生成代表性评论区域"""
+        if not self.features.get('has_comment_data', False):
+            return ''
+
+        comments = self._get_representative_comments()
+        if not comments:
+            return ''
+
+        html = '''
+        <div class="section">
+            <div class="section-title">💬 代表性用户评论</div>
+            <div class="comment-list">
+        '''
+
+        sentiment_labels = {
+            'positive': ('正面', '#52c41a'),
+            'negative': ('负面', '#f5222d'),
+            'neutral': ('中性', '#faad14')
+        }
+
+        # 按平台分组展示
+        platform_groups = {}
+        for comment in comments:
+            platform = comment.get('platform', 'unknown')
+            if platform not in platform_groups:
+                platform_groups[platform] = []
+            platform_groups[platform].append(comment)
+
+        for platform, platform_comments in list(platform_groups.items())[:3]:  # 最多显示3个平台
+            platform_name = self.PLATFORM_NAMES.get(platform, platform)
+            icon = self.PLATFORM_ICONS.get(platform, '📊')
+
+            html += f'<div style="margin-bottom: 15px; padding: 10px; background: rgba(102,126,234,0.05); border-radius: 8px;">'
+            html += f'<div style="font-weight: 600; color: #667eea; margin-bottom: 10px;">{icon} {platform_name}</div>'
+
+            for comment in platform_comments[:3]:  # 每个平台最多3条
+                sentiment = comment['sentiment']
+                label, color = sentiment_labels.get(sentiment, ('中性', '#faad14'))
+
+                intent_tag = ' 🛒 购买意向' if comment.get('has_intent') else ''
+
+                html += f'''
+                <div class="comment-item" style="border-left-color: {color}; margin-bottom: 10px;">
+                    <div class="comment-header">
+                        <span class="comment-user">👤 {comment.get('nickname', '匿名用户')}</span>
+                        <span class="comment-senti" style="background: {color}20; color: {color};">{label}{intent_tag}</span>
+                    </div>
+                    <div class="comment-content">{comment['content'][:150]}...</div>
+                    <div class="comment-footer">
+                        <span>❤️ {comment.get('like_count', 0)}</span>
+                    </div>
+                </div>
+                '''
+
+            html += '</div>'
+
+        html += '</div></div>'
+        return html
+
+    def generate_html(self) -> str:
+        """生成多平台合并的HTML报告"""
+        report_type_name = self.REPORT_TYPE_NAMES.get(self.report_type, '舆情分析')
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        # 生成各模块
+        platform_breakdown = self._get_platform_breakdown()
+        metric_cards = self._generate_metric_cards()
+        sentiment_chart = self._generate_sentiment_chart() if self.report_type in ['sentiment', 'risk'] else ''
+        content_list = self._generate_platform_content_list()
+        hot_words = self._generate_hot_words()
+        insights = self._generate_insights()
+        comments_section = self._generate_comments_section()
+
+        # 平台列表
+        platform_names = [self.PLATFORM_NAMES.get(p, p) for p in self.platform_data.keys()]
+
+        return f'''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多平台_{self.keywords}_{report_type_name}报告</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }}
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+        }}
+
+        .header {{
+            text-align: center;
+            padding: 40px 20px;
+            background: rgba(255,255,255,0.95);
+            border-radius: 20px;
+            margin-bottom: 25px;
+            box-shadow: 0 15px 50px rgba(0,0,0,0.15);
+        }}
+        .header h1 {{
+            font-size: 2.2em;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }}
+        .header .subtitle {{
+            color: #666;
+            margin-top: 12px;
+            font-size: 1.1em;
+        }}
+        .header .meta {{
+            color: #999;
+            margin-top: 12px;
+            font-size: 0.9em;
+        }}
+
+        .section {{
+            background: rgba(255,255,255,0.95);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }}
+        .section-title {{
+            font-size: 1.4em;
+            color: #333;
+            margin-bottom: 20px;
+            padding-left: 12px;
+            border-left: 4px solid #667eea;
+        }}
+
+        .metric-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 15px;
+        }}
+        .metric-card {{
+            background: rgba(255,255,255,0.9);
+            border-radius: 16px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+        }}
+        .metric-icon {{ font-size: 2em; margin-bottom: 8px; }}
+        .metric-value {{
+            font-size: 1.8em;
+            font-weight: bold;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }}
+        .metric-label {{ color: #666; margin-top: 5px; font-size: 0.85em; }}
+
+        .content-list {{ margin-top: 10px; }}
+        .content-item {{
+            display: flex;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #eee;
+        }}
+        .content-rank {{
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.75em;
+            margin-right: 12px;
+            background: #f0f0f0;
+            color: #666;
+            flex-shrink: 0;
+            text-align: center;
+        }}
+        .content-info {{ flex: 1; min-width: 0; }}
+        .content-title {{
+            font-weight: 500;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: #333;
+        }}
+        .content-meta {{ font-size: 0.8em; color: #888; margin-top: 4px; }}
+        .content-stats {{
+            font-size: 0.8em;
+            color: #666;
+            text-align: right;
+            white-space: nowrap;
+        }}
+
+        .word-cloud {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 16px;
+        }}
+        .word-tag {{
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 500;
+            cursor: pointer;
+        }}
+        .word-tag.size-1 {{ font-size: 0.85em; opacity: 0.7; }}
+        .word-tag.size-2 {{ font-size: 0.95em; opacity: 0.85; }}
+        .word-tag.size-3 {{ font-size: 1.1em; }}
+        .word-tag.size-4 {{ font-size: 1.25em; box-shadow: 0 3px 10px rgba(0,0,0,0.1); }}
+        .word-tag.size-5 {{ font-size: 1.5em; box-shadow: 0 4px 15px rgba(0,0,0,0.15); }}
+
+        .insight-list {{ display: grid; gap: 15px; }}
+        .insight-item {{
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px 20px;
+            border-radius: 0 12px 12px 0;
+        }}
+        .insight-title {{
+            color: #667eea;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }}
+        .insight-content {{ color: #555; font-size: 0.95em; line-height: 1.6; }}
+
+        .comment-list {{ display: grid; gap: 12px; }}
+        .comment-item {{
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 12px;
+            border-left: 4px solid #ddd;
+        }}
+        .comment-header {{
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.8em;
+        }}
+        .comment-user {{ color: #667eea; font-weight: 500; }}
+        .comment-senti {{
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.7em;
+            font-weight: bold;
+        }}
+        .comment-content {{ color: #333; line-height: 1.6; font-size: 0.95em; }}
+        .comment-footer {{
+            margin-top: 8px;
+            font-size: 0.75em;
+            color: #888;
+            display: flex;
+            gap: 12px;
+        }}
+
+        .chart-container {{ width: 100%; height: 280px; }}
+
+        .footer {{
+            text-align: center;
+            padding: 30px;
+            color: rgba(255,255,255,0.9);
+        }}
+
+        @media (max-width: 768px) {{
+            .header h1 {{ font-size: 1.6em; }}
+            .metric-grid {{ grid-template-columns: repeat(2, 1fr); }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>多平台 {report_type_name}报告</h1>
+            <p class="subtitle">关键词：「{self.keywords}」</p>
+            <p class="meta">覆盖平台：{', '.join(platform_names)} | 生成时间：{timestamp} | 总样本：{len(self.all_data)}条</p>
+        </header>
+
+        <!-- 1. 平台分布概览 -->
+        <div class="section">
+            <div class="section-title">🌐 平台数据分布</div>
+            {platform_breakdown}
+        </div>
+
+        <!-- 2. 核心数据概览 -->
+        <div class="section">
+            <div class="section-title">📊 核心数据概览</div>
+            {metric_cards}
+        </div>
+
+        <!-- 3. 情感分析 -->
+        {sentiment_chart}
+
+        <!-- 4. 热门内容排行 -->
+        <div class="section">
+            <div class="section-title">🏆 各平台热门内容 TOP 3</div>
+            {content_list}
+        </div>
+
+        <!-- 5. 热词分析 -->
+        <div class="section">
+            <div class="section-title">☁️ 热门讨论词云</div>
+            {hot_words}
+        </div>
+
+        <!-- 6. 舆情洞察 -->
+        <div class="section">
+            <div class="section-title">💡 多平台舆情洞察</div>
+            {insights}
+        </div>
+
+        <!-- 7. 代表性评论 -->
+        {comments_section}
+
+        <footer class="footer">
+            <p>📊 多平台智能分析报告 | 生成时间：{timestamp}</p>
+        </footer>
+    </div>
+</body>
+</html>'''
+
+    def save_report(self) -> str:
+        """保存报告"""
+        os.makedirs(self.output_path, exist_ok=True)
+
+        report_type_name = self.REPORT_TYPE_NAMES.get(self.report_type, '舆情分析')
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_keyword = re.sub(r'[\\/*?:"<>|]', "_", self.keywords)[:30]
+        filename = f"多平台_{safe_keyword}_{report_type_name}_{timestamp}.html"
+        filepath = os.path.join(self.output_path, filename)
+
+        html_content = self.generate_html()
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+
+        return filepath
+
+    def get_console_summary(self) -> str:
+        """获取控制台摘要"""
+        total_items = len(self.all_data)
+        platform_names = [self.PLATFORM_NAMES.get(p, p) for p in self.platform_data.keys()]
+
+        summary_parts = [
+            f"📊 多平台「{self.keywords}」舆情分析报告",
+            f"🌐 覆盖平台：{', '.join(platform_names)}",
+            f"📈 数据概览：共采集 {total_items} 条内容",
+        ]
+
+        # 平台分布
+        for platform, count in sorted(self.platform_stats.items(), key=lambda x: x[1], reverse=True):
+            platform_name = self.PLATFORM_NAMES.get(platform, platform)
+            summary_parts.append(f"   • {platform_name}: {count}条")
+
+        # 互动数据
+        if self.features.get('has_likes'):
+            summary_parts.append(f"❤️ 总点赞: {self._format_number(self.profile['totals']['likes'])}")
+        if self.features.get('has_comments'):
+            summary_parts.append(f"💬 总评论: {self._format_number(self.profile['totals']['comments'])}")
+        if self.features.get('has_views'):
+            summary_parts.append(f"👁️ 总播放: {self._format_number(self.profile['totals']['views'])}")
+
+        # 情感分析
+        if self.features.get('has_comment_data'):
+            sentiment_pct = self._analyze_sentiment()
+            summary_parts.append(f"💭 情感分布：正面 {sentiment_pct.get('positive', 0)}% | 负面 {sentiment_pct.get('negative', 0)}% | 中性 {sentiment_pct.get('neutral', 0)}%")
+
+        return "\n".join(summary_parts)
+
+
+def generate_multi_platform_report(
+    platform_data: Dict[str, List[Dict]],
+    keywords: str,
+    output_path: str = "reports",
+    report_type: str = "sentiment"
+) -> Tuple[str, str, str]:
+    """
+    生成多平台合并报告主函数
+
+    Args:
+        platform_data: {平台代码: 数据列表} 的字典
+        keywords: 关键词
+        output_path: 输出路径
+        report_type: 报告类型
+
+    Returns:
+        (report_path, console_summary, html_content)
+    """
+    os.makedirs(output_path, exist_ok=True)
+
+    generator = MultiPlatformReportGenerator(platform_data, keywords, output_path, report_type)
+
+    # 保存报告
+    report_path = generator.save_report()
+    abs_path = os.path.abspath(report_path)
+
+    # 生成摘要
+    summary = generator.get_console_summary()
+
+    return abs_path, summary, generator.generate_html()

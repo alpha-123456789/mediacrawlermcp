@@ -36,7 +36,8 @@ PLATFORM_NAMES = {
     'bili': 'B站',
     'wb': '微博',
     'tieba': '百度贴吧',
-    'zhihu': '知乎'
+    'zhihu': '知乎',
+    'toutiao': '今日头条'
 }
 
 
@@ -53,6 +54,7 @@ class Platform(str, Enum):
     WB = "wb"             # 微博
     TIEBA = "tieba"       # 百度贴吧
     ZHIHU = "zhihu"       # 知乎
+    TOUTIAO = "toutiao"   # 今日头条
 
 
 class CrawlerType(str, Enum):
@@ -501,6 +503,85 @@ def process_ks_data(data: List[Dict]) -> List[Dict]:
     return items
 
 
+def process_toutiao_data(data: List[Dict]) -> List[Dict]:
+    """
+    处理今日头条数据
+
+    数据结构特点 (_filter_note 返回):
+    - article_id: 文章ID
+    - title: 文章标题
+    - content/abstract: 文章内容/摘要
+    - source/author: 内容来源/作者
+    - url: 文章链接
+    - create_time/publish_time: 创建时间
+    - read_count/like_count/comment_count/share_count: 互动数据
+    - has_video/has_image: 是否有视频/图片
+    - user: 作者信息 {user_id, nickname, avatar}
+    - comments: 评论列表 {comment_id, content, like_count, user, sub_comments}
+    """
+    if not data:
+        return []
+
+    items = []
+    for post in data:
+        # 处理评论列表
+        comment_list = []
+        comments = post.get("comments") or []
+
+        for comment in comments:
+            # 处理子评论
+            sub_comment_list = []
+            sub_comments = comment.get("sub_comments") or []
+            for sub_comment in sub_comments:
+                # 获取子评论用户信息
+                sub_user = sub_comment.get("user", {})
+                sub_comment_list.append({
+                    "content": sub_comment.get("content", ""),
+                    "create_time": sub_comment.get("create_time", 0),
+                    "like_count": sub_comment.get("like_count", 0),
+                    "sub_comment_nickname": sub_user.get("nickname", "")
+                })
+
+            # 获取评论用户信息
+            comment_user = comment.get("user", {})
+            comment_list.append({
+                "comment_id": comment.get("comment_id", ""),
+                "content": comment.get("content", ""),
+                "create_time": comment.get("create_time", 0),
+                "like_count": comment.get("like_count", 0),
+                "is_pgc": 1 if comment.get("is_sub_comment") else 0,
+                "comment_nickname": comment_user.get("nickname", ""),
+                "sub_comment_count": len(sub_comment_list),
+                "sub_comment_list": sub_comment_list
+            })
+
+        # 获取作者信息
+        user_info = post.get("user", {})
+
+        # 构建互动信息
+        interact_info = {
+            "read_count": post.get("read_count", 0),
+            "like_count": post.get("like_count", 0),
+            "comment_count": post.get("comment_count", 0),
+            "share_count": post.get("share_count", 0)
+        }
+
+        items.append({
+            "note_id": post.get("article_id", ""),
+            "title": post.get("title", ""),
+            "abstract": post.get("abstract") or post.get("content", ""),
+            "source": post.get("source") or post.get("author", ""),
+            "share_url": post.get("url", ""),
+            "create_time": post.get("publish_time") or post.get("create_time", 0),
+            "nickname": user_info.get("nickname", ""),
+            "avatar_url": user_info.get("avatar", ""),
+            "interact_info": interact_info,
+            "comments": comment_list
+        })
+
+    return items
+
+
 # =========================
 # 数据处理器分发器
 # =========================
@@ -513,6 +594,7 @@ PLATFORM_PROCESSORS = {
     Platform.ZHIHU.value: process_zhihu_data,
     Platform.TIEBA.value: process_tieba_data,
     Platform.KS.value: process_ks_data,
+    Platform.TOUTIAO.value: process_toutiao_data,
 }
 
 
@@ -588,7 +670,6 @@ async def crawl_media(
     is_get_sub_comments: bool = False,
     max_comments_count: int = 20,
     save_data_option: str = "",
-    output_path: str = None,
     report_type: str = "sentiment",
     report_mode: str = "auto",
 ) -> str:
@@ -606,9 +687,10 @@ async def crawl_media(
     - wb: 微博
     - tieba: 百度贴吧
     - zhihu: 知乎
+    - toutiao: 今日头条
 
     Args:
-        platform: 平台名称，可选值: xhs, dy, ks, bili, wb, tieba, zhihu
+        platform: 平台名称，可选值: xhs, dy, ks, bili, wb, tieba, zhihu, toutiao
         crawler_type: 爬取类型，search(关键词搜索)
         keywords: 搜索关键词 (search类型) 或 内容ID (detail类型) 或 创作者ID (creator类型)
         max_count: 返回帖子数量，默认20，范围1-100
@@ -616,7 +698,6 @@ async def crawl_media(
         is_get_sub_comments: 是否爬取子评论，默认False
         max_comments_count: 返回帖子下评论数量以及每个评论的子评论的数量，默认20，范围0-50
         save_data_option: 数据存储方式，可选值: ""(不存储), "db"(存储到数据库)，默认""
-        output_path: 报告保存目录，不指定则使用项目根目录下的 reports 文件夹
         report_type: 报告类型，可选值: "sentiment"(情感分析), "trend"(热门趋势), "hot_topics"(热门话题), "keyword"(关键词分析), "volume"(声量分析), "viral_spread"(传播分析), "influencer"(影响力账号), "audience"(用户画像), "comparison"(竞品对比), "risk"(舆情风险)，默认"sentiment"
 
     Note:
@@ -639,9 +720,8 @@ async def crawl_media(
     """
     try:
         # 如果未指定输出路径，使用默认报告目录（项目根目录下的 reports）
-        if output_path is None:
-            DEFAULT_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            output_path = str(DEFAULT_REPORTS_DIR)
+        DEFAULT_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        output_path = str(DEFAULT_REPORTS_DIR)
 
         # 参数验证
         is_valid, error_msg = validate_inputs(
@@ -922,6 +1002,7 @@ async def get_platforms() -> str:
         {"code": Platform.WB.value, "name": "微博", "description": "社交媒体平台"},
         {"code": Platform.TIEBA.value, "name": "百度贴吧", "description": "兴趣社区论坛"},
         {"code": Platform.ZHIHU.value, "name": "知乎", "description": "问答知识社区"},
+        {"code": Platform.TOUTIAO.value, "name": "今日头条", "description": "新闻资讯聚合平台"},
     ]
 
     return json.dumps(
@@ -968,7 +1049,6 @@ async def crawl_multi_platform(
     is_get_sub_comments: bool = False,
     max_comments_count: int = 20,
     save_data_option: str = "",
-    output_path: str = None,
     report_type: str = "sentiment",
     report_mode: str = "auto",
 ) -> str:
@@ -986,6 +1066,7 @@ async def crawl_multi_platform(
     - wb: 微博
     - tieba: 百度贴吧
     - zhihu: 知乎
+    - toutiao: 今日头条
 
     Args:
         platforms: 平台名称列表，例如 ["xhs", "dy", "bili"]
@@ -996,7 +1077,6 @@ async def crawl_multi_platform(
         is_get_sub_comments: 是否爬取子评论，默认False
         max_comments_count: 返回帖子下评论数量以及每个评论的子评论的数量，默认20，范围0-50
         save_data_option: 数据存储方式，可选值: ""(不存储), "db"(存储到数据库)，默认""
-        output_path: 报告保存目录，不指定则使用项目根目录下的 reports 文件夹
         report_type: 报告类型，可选值: "sentiment"(情感分析), "trend"(热门趋势), "hot_topics"(热门话题), "keyword"(关键词分析), "volume"(声量分析), "viral_spread"(传播分析), "influencer"(影响力账号), "audience"(用户画像), "comparison"(竞品对比), "risk"(舆情风险)，默认"sentiment"
 
     Note:
@@ -1020,9 +1100,8 @@ async def crawl_multi_platform(
     """
     try:
         # 如果未指定输出路径，使用默认报告目录（项目根目录下的 reports）
-        if output_path is None:
-            DEFAULT_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            output_path = str(DEFAULT_REPORTS_DIR)
+        DEFAULT_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        output_path = str(DEFAULT_REPORTS_DIR)
 
         # 验证参数
         valid_platforms = [p.value for p in Platform]

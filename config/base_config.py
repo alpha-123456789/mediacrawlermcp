@@ -18,7 +18,7 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 # Basic configuration
-PLATFORM = "xhs"  # Platform, xhs | dy | ks | bili | wb | tieba | zhihu
+PLATFORM = "xhs"  # Platform, xhs | dy | ks | bili | wb | tieba | zhihu | toutiao
 KEYWORDS = "编程副业,编程兼职"  # Keyword search configuration, separated by English commas
 LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
 COOKIES = ""
@@ -118,7 +118,7 @@ STOP_WORDS_FILE = "./docs/hit_stopwords.txt"
 FONT_PATH = "./docs/STZHONGS.TTF"
 
 # Crawl interval
-CRAWLER_MAX_SLEEP_SEC = 1
+CRAWLER_MAX_SLEEP_SEC = 0.3
 
 from .bilibili_config import *
 from .xhs_config import *
@@ -127,3 +127,4 @@ from .ks_config import *
 from .weibo_config import *
 from .tieba_config import *
 from .zhihu_config import *
+from .toutiao_config import *

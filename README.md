@@ -8,13 +8,14 @@
 
 | 平台 | 代码 | 功能 |
 |------|------|------|
-| 小红书 | xhs | 关键词搜索、评论采集 |
-| 抖音 | dy | 关键词搜索、评论采集 |
-| 快手 | ks | 关键词搜索、评论采集 |
-| B站 | bili | 关键词搜索、评论采集 |
+| 小红书 | xhs | 关键词搜索、评论采集、子评论采集 |
+| 抖音 | dy | 关键词搜索、评论采集、子评论采集 |
+| 快手 | ks | 关键词搜索、评论采集、子评论采集 |
+| B站 | bili | 关键词搜索、评论采集、子评论采集 |
 | 微博 | wb | 关键词搜索、评论采集 |
-| 百度贴吧 | tieba | 关键词搜索、评论采集 |
-| 知乎 | zhihu | 关键词搜索、评论采集 |
+| 百度贴吧 | tieba | 关键词搜索、评论采集、子评论采集 |
+| 知乎 | zhihu | 关键词搜索、评论采集、子评论采集 |
+| 今日头条 | toutiao | 关键词搜索、评论采集、子评论采集 |
 
 ## 📋 环境安装
 
@@ -125,21 +126,57 @@ result = await crawl_media(
 
 | 参数 | 必填 | 说明 | 可选值 |
 |------|------|------|--------|
-| `platform` | 是 | 平台代码 | `xhs`, `dy`, `ks`, `bili`, `wb`, `tieba`, `zhihu` |
+| `platform` | 是 | 平台代码 | `xhs`, `dy`, `ks`, `bili`, `wb`, `tieba`, `zhihu`, `toutiao` |
 | `crawler_type` | 否 | 爬取类型 | `search`(默认), `detail`, `creator` |
 | `keywords` | 是 | 搜索关键词 | 任意文本 |
 | `max_count` | 否 | 爬取数量 | 1-100，默认20 |
 | `is_get_comments` | 否 | 是否获取评论 | `true`/`false`，默认`false` |
-| `max_comments_count` | 否 | 每条帖子的评论数 | 0-50，默认10 |
+| `is_get_sub_comments` | 否 | 是否获取子评论 | `true`/`false`，默认`false` |
+| `max_comments_count` | 否 | 一级评论数及每条下子评论数 | 0-50，默认20 |
+| `report_type` | 否 | 报告类型 | 见下表，默认`sentiment` |
 | `report_mode` | 否 | 报告模式 | `auto`(默认), `ai`, `script` |
+| `save_data_option` | 否 | 数据存储方式 | `""`(不存储), `"db"` |
 | `output_path` | 否 | 报告输出目录 | 默认`reports` |
+
+**报告类型 (report_type)：**
+
+| 类型 | 代码 | 说明 |
+|------|------|------|
+| 舆情分析 | `sentiment` | 情感分布、正负面分析、舆情洞察 |
+| 趋势分析 | `trend` | 热度趋势、时间线分析、变化预测 |
+| 热点话题 | `hot_topics` | 热门话题识别、话题聚类、传播路径 |
+| 关键词分析 | `keyword` | 关键词频率、关联词、语义网络 |
+| 传播量分析 | `volume` | 传播量统计、峰值检测、平台分布 |
+| 病毒传播 | `viral_spread` | 传播节点、裂变路径、KOL影响 |
+| 达人分析 | `influencer` | KOL识别、影响力评估、合作建议 |
+| 受众分析 | `audience` | 用户画像、兴趣分布、活跃时段 |
+| 竞品对比 | `comparison` | 竞品提取、对比分析、优劣势 |
+| 风险预警 | `risk` | 风险识别、危机预警、应对建议 |
 
 **自然语言示例：**
 
 ```
 搜索小红书上关于"Python编程"的热门帖子
-爬取B站关于"宝宝巴士"的视频和评论
-用脚本模式生成抖音"美食探店"的舆情报告
+爬取B站关于"宝宝巴士"的视频和评论，做舆情分析
+分析抖音"美食探店"的传播趋势
+微博上"新能源汽车"的风险预警报告
+```
+
+**返回示例：**
+```json
+{
+  "status": "success",
+  "platform": "bili",
+  "platform_name": "B站",
+  "report_mode": "ai_enhanced",
+  "keywords": "宝宝巴士",
+  "report_path": "/path/to/reports/舆情分析报告_xxx.html",
+  "relative_path": "reports/舆情分析报告_xxx.html",
+  "summary": "舆情分析摘要...",
+  "has_ai_config": true,
+  "verification_samples": [],
+  "message": "报告已生成"
+}
 ```
 
 ### 2. crawl_multi_platform 工具 - 多平台爬取
@@ -163,9 +200,10 @@ result = await crawl_multi_platform(
 **多平台报告特点：**
 - 一个HTML报告包含所有平台数据
 - 展示各平台内容分布比例
-- 跨平台热词統一分析
+- 跨平台热词统一分析
 - 各平台情感倾向对比
 - 分平台内容策略建议
+- 单个平台失败不会中断整个操作
 
 **参数说明：**
 
@@ -176,9 +214,29 @@ result = await crawl_multi_platform(
 | `keywords` | 是 | 搜索关键词 | 任意文本 |
 | `max_count` | 否 | 每个平台爬取数量 | 1-100，默认20 |
 | `is_get_comments` | 否 | 是否获取评论 | `true`/`false`，默认`false` |
-| `max_comments_count` | 否 | 每条帖子的评论数 | 0-50，默认10 |
+| `is_get_sub_comments` | 否 | 是否获取子评论 | `true`/`false`，默认`false` |
+| `max_comments_count` | 否 | 一级评论数及每条下子评论数 | 0-50，默认20 |
+| `report_type` | 否 | 报告类型 | 见上表，默认`sentiment` |
 | `report_mode` | 否 | 报告模式 | `auto`(默认), `ai`, `script` |
 | `output_path` | 否 | 报告输出目录 | 默认`reports` |
+
+**返回示例：**
+```json
+{
+  "status": "success",
+  "platforms": ["bili", "dy", "xhs"],
+  "platform_names": ["B站", "抖音", "小红书"],
+  "report_mode": "ai_enhanced",
+  "keywords": "宝宝巴士",
+  "total_items": 60,
+  "platform_breakdown": {"xhs": 20, "dy": 20, "bili": 20},
+  "report_path": "/path/to/reports/多平台_宝宝巴士_舆情分析报告_xxx.html",
+  "relative_path": "reports/多平台_宝宝巴士_舆情分析报告_xxx.html",
+  "summary": "多平台综合分析摘要...",
+  "verification_samples": {},
+  "message": "多平台舆情分析报告已生成"
+}
+```
 
 **自然语言示例：**
 
@@ -192,8 +250,37 @@ result = await crawl_multi_platform(
 
 | 工具名 | 功能 | 用法 |
 |--------|------|------|
-| `get_platforms` | 获取支持的平台列表 | 显示所有可爬取的平台代码和名称 |
+| `get_platforms` | 获取支持的平台列表 | 显示所有可爬取的平台代码、名称和描述 |
 | `get_crawler_types` | 获取支持的爬取类型 | 显示可用的爬取类型说明 |
+
+### 子评论（二级评论）说明
+
+设置 `is_get_sub_comments=true` 后，爬虫会为每条一级评论获取完整的子评论列表。`max_comments_count` 同时控制一级评论总数和每条一级评论下的子评论数量。
+
+**子评论合并机制：** 各平台爬虫获取子评论后，会自动合并到一级评论的对应字段中，确保返回数据包含完整子评论（而非仅 API 默认预览的 2-3 条）。
+
+| 平台 | 子评论存储字段 |
+|------|--------------|
+| B站 | `replies` |
+| 小红书 | `sub_comments` |
+| 抖音 | `reply_comment` |
+| 快手 | `subCommentsV2` |
+| 微博 | `comments`（嵌入一级评论中） |
+| 贴吧 | `sub_comment_list` |
+| 知乎 | `sub_comment_list` |
+| 今日头条 | `sub_comments` |
+
+**示例：获取 B 站视频的评论和子评论**
+```python
+result = await crawl_media(
+    platform="bili",
+    keywords="宝宝巴士",
+    max_count=20,
+    is_get_comments=True,
+    is_get_sub_comments=True,
+    max_comments_count=5  # 每条一级评论下最多获取 5 条子评论
+)
+```
 
 ### 报告模式说明
 
@@ -233,38 +320,25 @@ ANTHROPIC_BASE_URL=https://api.anthropic.com
 
 > **注意**：AI 模式会调用 LLM API 生成报告，可能产生 API 调用费用。如需离线使用，请切换到 `script` 模式。
 
-**单平台返回示例：**
-```json
-{
-  "status": "success",
-  "platform": "bili",
-  "platform_name": "B站",
-  "report_mode": "ai",
-  "keywords": "宝宝巴士",
-  "summary": "舆情分析摘要...",
-  "report_path": "reports/舆情分析报告_xxx.html"
-}
-```
+### CDP 浏览器模式
 
-**多平台返回示例：**
-```json
-{
-  "status": "success",
-  "platforms": ["bili", "dy", "xhs"],
-  "platform_names": ["B站", "抖音", "小红书"],
-  "report_mode": "ai_enhanced",
-  "keywords": "宝宝巴士",
-  "total_items": 60,
-  "summary": "多平台综合分析摘要...",
-  "report_path": "reports/多平台_宝宝巴士_舆情分析报告_xxx.html"
-}
-```
+支持通过 Chrome DevTools Protocol 连接用户真实浏览器，提高反检测能力。
+
+**配置项（`config/base_config.py`）：**
+
+| 配置 | 默认值 | 说明 |
+|------|--------|------|
+| `ENABLE_CDP_MODE` | `True` | 启用 CDP 模式 |
+| `CDP_DEBUG_PORT` | `9222` | CDP 调试端口 |
+| `CUSTOM_BROWSER_PATH` | `""` | 自定义浏览器路径 |
+| `CDP_HEADLESS` | `False` | 是否无头模式 |
+| `BROWSER_LAUNCH_TIMEOUT` | `60` | 浏览器启动超时（秒） |
+| `AUTO_CLOSE_BROWSER` | `True` | 自动关闭浏览器 |
 
 ### 完整使用示例
 
 **示例1：单平台舆情监测**
 ```python
-# 分析小红书关于"完美日记"的用户反馈
 result = await crawl_media(
     platform="xhs",
     keywords="完美日记",
@@ -275,7 +349,6 @@ result = await crawl_media(
 
 **示例2：多平台对比分析**
 ```python
-# 同时抓取三个平台，生成对比报告
 result = await crawl_multi_platform(
     platforms=["bili", "dy", "xhs"],
     keywords="国潮品牌",
@@ -284,9 +357,18 @@ result = await crawl_multi_platform(
 )
 ```
 
-**示例3：静态报告（固定格式）**
+**示例3：风险预警报告**
 ```python
-# 需要统一格式、批量对比时使用
+result = await crawl_media(
+    platform="wb",
+    keywords="品牌危机",
+    report_type="risk",
+    is_get_comments=True
+)
+```
+
+**示例4：静态报告（固定格式）**
+```python
 result = await crawl_media(
     platform="bili",
     keywords="宝宝巴士",
@@ -298,15 +380,27 @@ result = await crawl_media(
 
 ```
 .
-├── mcp_server.py        # MCP 服务入口
-├── mcp_adapter.py       # 爬虫适配器
-├── report_generator.py  # 舆情分析报告生成器
-├── ai_report_generator.py # AI 报告提示词生成器
-├── media_platform/      # 各平台爬虫实现
-├── config/             # 配置文件
-├── store/              # 数据存储
-├── reports/            # 生成的报告输出目录
-└── pyproject.toml      # 项目依赖
+├── mcp_server.py             # MCP 服务入口（4个工具）
+├── mcp_adapter.py            # 爬虫适配器
+├── report_generator.py       # 脚本报告生成器（11种报告类型）
+├── ai_report_generator.py    # AI 报告数据准备和提示词构建
+├── llm_report_generator.py   # LLM API 调用和 HTML 报告生成
+├── auto_field_detector.py    # 自动字段映射（消除硬编码依赖）
+├── tools/cdp_browser.py      # CDP 浏览器管理器
+├── media_platform/           # 各平台爬虫实现
+│   ├── xhs/                  # 小红书
+│   ├── douyin/               # 抖音
+│   ├── kuaishou/             # 快手
+│   ├── bilibili/             # B站
+│   ├── weibo/                # 微博
+│   ├── tieba/                # 百度贴吧
+│   ├── zhihu/                # 知乎
+│   └── toutiao/              # 今日头条
+├── config/                   # 配置文件
+├── store/                    # 数据存储
+├── original_data/            # 爬取原始数据（JSON）
+├── reports/                  # 生成的报告输出目录
+└── pyproject.toml            # 项目依赖
 ```
 
 ## ⚠️ 免责声明

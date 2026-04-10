@@ -359,6 +359,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 crawl_interval=crawl_interval,
                 callback=xhs_store.batch_update_xhs_note_comments,
                 max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
+                max_sub_comments_count=config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES,
             )
 
             # Sleep after fetching comments

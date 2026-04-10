@@ -19,7 +19,7 @@
 
 
 # -*- coding: utf-8 -*-
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -60,6 +60,7 @@ class TiebaComment(BaseModel):
     publish_time: str = Field(default="", description="Publish time")
     ip_location: Optional[str] = Field(default="", description="IP location")
     sub_comment_count: int = Field(default=0, description="Sub-comment count")
+    sub_comment_list: List["TiebaComment"] = Field(default_factory=list, description="Sub-comment list")
     like_count: int = Field(default=0, description="Like count")
     note_id: str = Field(..., description="Post ID")
     note_url: str = Field(..., description="Post link")

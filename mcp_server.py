@@ -10,6 +10,7 @@
 
 import json
 import os
+import re
 from datetime import datetime
 import asyncio
 from typing import Any, Dict, List, Optional, Union
@@ -198,7 +199,7 @@ def process_bili_data(data: List[Dict]) -> List[Dict]:
                 sub_comment_list.append({
                     "content": content_str,
                     "create_time": sub_comment.get("ctime", ""),
-                    "like_count": sub_comment.get("like_count", 0),
+                    "like_count": sub_comment.get("like", 0),
                     "sub_comment_nickname": sub_comment.get("member", {}).get("uname", "")
                 })
 
@@ -213,7 +214,7 @@ def process_bili_data(data: List[Dict]) -> List[Dict]:
 
             comment_list.append({
                 "content": comment_content,
-                "sub_comment_count": len(sub_comment_list),
+                "sub_comment_count": comment.get("rcount", 0),
                 "like_count": comment.get("like", 0),
                 "comment_nickname": comment.get("member", {}).get("uname", ""),
                 "sub_comment_list": sub_comment_list
@@ -263,7 +264,7 @@ def process_dy_data(data: List[Dict]) -> List[Dict]:
                 sub_comment_list.append({
                     "content": sub_comment.get("text", ""),
                     "create_time": sub_comment.get("create_time", ""),
-                    "like_count": sub_comment.get("like_count", 0),
+                    "like_count": sub_comment.get("digg_count", 0),
                     "sub_comment_nickname": sub_comment.get("user", {}).get("nickname", ""),
                     "reply_comment": sub_comment.get("reply_comment", 0),
                     "digg_count": sub_comment.get("digg_count", 0),
@@ -276,7 +277,7 @@ def process_dy_data(data: List[Dict]) -> List[Dict]:
                 "create_time": comment.get("create_time", ""),
                 "item_comment_total": comment.get("item_comment_total", 0),
                 "reply_comment_total": comment.get("reply_comment_total", 0),
-                "like_count": comment.get("like_count", 0),
+                "like_count": comment.get("digg_count", 0),
                 "comment_nickname": comment.get("user", {}).get("nickname", ""),
                 "digg_count": comment.get("digg_count", 0),
                 "user_digged": comment.get("user_digged", 0),
@@ -294,6 +295,19 @@ def process_dy_data(data: List[Dict]) -> List[Dict]:
         })
 
     return items
+
+
+def strip_html(text: str) -> str:
+    """去除HTML标签，保留纯文本内容。如 <a href='...'>@用户</a> → @用户，<img alt='[666]'/> → [666]"""
+    if not text:
+        return text
+    # 将 <img> 标签替换为其 alt 属性值（表情符号）
+    text = re.sub(r'<img\s+alt=["\']([^"\']*)["\'][^>]*/?\s*>', r'\1', text)
+    # 去除所有其他 HTML 标签，保留内部文本
+    text = re.sub(r'<[^>]+>', '', text)
+    # 清理多余空白
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 
 def process_wb_data(data: List[Dict]) -> List[Dict]:
@@ -320,14 +334,14 @@ def process_wb_data(data: List[Dict]) -> List[Dict]:
             sub_comments = comment.get("comments") or []
             for sub_comment in sub_comments:
                 sub_comment_list.append({
-                    "content": sub_comment.get("text", ""),
+                    "content": strip_html(sub_comment.get("text", "")),
                     "create_time": sub_comment.get("created_at", ""),
-                    "sub_comment_nickname": sub_comment.get("user", {}).get("nickname", "")
+                    "sub_comment_nickname": sub_comment.get("user", {}).get("screen_name", "")
                 })
 
             comment_list.append({
                 "created_at": comment.get("created_at", ""),
-                "content": comment.get("text", ""),
+                "content": strip_html(comment.get("text", "")),
                 "sub_comment_count": len(sub_comment_list),
                 "like_count": comment.get("like_count", 0),
                 "comment_nickname": comment.get("user", {}).get("screen_name", ""),
@@ -347,7 +361,7 @@ def process_wb_data(data: List[Dict]) -> List[Dict]:
             "note_id": mblog.get("id", ""),
             "nickname": mblog.get("user", {}).get("screen_name", ""),
             "interact_info": interact_info,
-            "desc": mblog.get("text", ""),
+            "desc": strip_html(mblog.get("text", "")),
             "comments": comment_list
         })
 
@@ -375,13 +389,24 @@ def process_zhihu_data(data: List[Dict]) -> List[Dict]:
         comments = post.get("comments") or []
 
         for comment in comments:
+            # 处理子评论
+            sub_comment_list = []
+            sub_comments = comment.get("sub_comment_list") or []
+            for sub_comment in sub_comments:
+                sub_comment_list.append({
+                    "content": sub_comment.get("content", ""),
+                    "sub_comment_nickname": sub_comment.get("user_nickname", ""),
+                    "like_count": sub_comment.get("like_count", 0)
+                })
+
             comment_list.append({
                 "comment_id": comment.get("comment_id", ""),
                 "parent_comment_id": comment.get("parent_comment_id", ""),
                 "content": comment.get("content", ""),
                 "sub_comment_count": comment.get("sub_comment_count", 0),
                 "like_count": comment.get("like_count", 0),
-                "user_nickname": comment.get("user_nickname", "")
+                "user_nickname": comment.get("user_nickname", ""),
+                "sub_comment_list": sub_comment_list
             })
 
         interact_info = {
@@ -423,6 +448,17 @@ def process_tieba_data(data: List[Dict]) -> List[Dict]:
         comments = post.get("comments") or []
 
         for comment in comments:
+            # 处理子评论
+            sub_comment_list = []
+            sub_comments = comment.get("sub_comment_list") or []
+            for sub_comment in sub_comments:
+                sub_comment_list.append({
+                    "content": sub_comment.get("content", ""),
+                    "sub_comment_nickname": sub_comment.get("user_nickname", ""),
+                    "like_count": sub_comment.get("like_count", 0),
+                    "ip_location": sub_comment.get("ip_location", "")
+                })
+
             comment_list.append({
                 "content": comment.get("content", ""),
                 "parent_comment_id": comment.get("parent_comment_id", ""),
@@ -430,7 +466,8 @@ def process_tieba_data(data: List[Dict]) -> List[Dict]:
                 "sub_comment_count": comment.get("sub_comment_count", 0),
                 "like_count": comment.get("like_count", 0),
                 "comment_nickname": comment.get("user_nickname", ""),
-                "ip_location": comment.get("ip_location", "")
+                "ip_location": comment.get("ip_location", ""),
+                "sub_comment_list": sub_comment_list
             })
 
         interact_info = {
@@ -476,11 +513,34 @@ def process_ks_data(data: List[Dict]) -> List[Dict]:
 
         comments = post.get("comments") or []
 
+        # 处理评论，提取子评论
+        comment_list = []
+        for comment in comments:
+            sub_comment_list = []
+            sub_comments = comment.get("subCommentsV2") or []
+            for sub_comment in sub_comments:
+                sub_comment_list.append({
+                    "content": sub_comment.get("content", ""),
+                    # V2 REST API: author_name (flat), GraphQL: author.name (nested)
+                    "sub_comment_nickname": sub_comment.get("author_name") or sub_comment.get("authorName") or sub_comment.get("author", {}).get("name", ""),
+                    "like_count": sub_comment.get("likeCount", 0)
+                })
+
+            comment_list.append({
+                "content": comment.get("content", ""),
+                # V2 REST API: author_name (flat), GraphQL: author.name (nested)
+                "comment_nickname": comment.get("author_name") or comment.get("authorName") or comment.get("author", {}).get("name", ""),
+                "like_count": comment.get("likeCount", 0),
+                "sub_comment_count": len(sub_comment_list),
+                "sub_comment_list": sub_comment_list
+            })
+
         interact_info = {
             "likeCount": photo.get("likeCount", 0),
             "viewCount": photo.get("viewCount", 0),
             "duration": photo.get("duration", 0),
-            "commentCount": photo.get("commentCount", 0),
+            # commentCountV2 来自 V2 评论 API，通过 core.py 注入到 post 层级
+            "commentCount": post.get("commentCountV2") or photo.get("commentCount") or 0,
             "realLikeCount": photo.get("realLikeCount", 0)
         }
 
@@ -497,7 +557,7 @@ def process_ks_data(data: List[Dict]) -> List[Dict]:
             "originCaption": photo.get("originCaption", ""),
             "nickname": author_name,
             "interact_info": interact_info,
-            "comments": comments
+            "comments": comment_list
         })
 
     return items
@@ -569,6 +629,7 @@ def process_toutiao_data(data: List[Dict]) -> List[Dict]:
         items.append({
             "note_id": post.get("article_id", ""),
             "title": post.get("title", ""),
+            "desc": post.get("content", ""),
             "abstract": post.get("abstract") or post.get("content", ""),
             "source": post.get("source") or post.get("author", ""),
             "share_url": post.get("url", ""),
@@ -696,7 +757,7 @@ async def crawl_media(
         max_count: 返回帖子数量，默认20，范围1-100
         is_get_comments: 是否爬取评论，默认False
         is_get_sub_comments: 是否爬取子评论，默认False
-        max_comments_count: 返回帖子下评论数量以及每个评论的子评论的数量，默认20，范围0-50
+        max_comments_count: 主评论数量，以及每个主评论下子评论的数量，默认20，范围0-50（主评论和子评论数量分别控制）
         save_data_option: 数据存储方式，可选值: ""(不存储), "db"(存储到数据库)，默认""
         report_type: 报告类型，可选值: "sentiment"(情感分析), "trend"(热门趋势), "hot_topics"(热门话题), "keyword"(关键词分析), "volume"(声量分析), "viral_spread"(传播分析), "influencer"(影响力账号), "audience"(用户画像), "comparison"(竞品对比), "risk"(舆情风险)，默认"sentiment"
 
@@ -775,6 +836,19 @@ async def crawl_media(
 
         # 处理平台数据
         items = process_platform_data(platform, raw_data)
+
+        # 保存处理后数据到JSON文件
+        if items:
+            try:
+                raw_data_dir = PROJECT_ROOT / "original_data"
+                raw_data_dir.mkdir(exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                raw_data_file = raw_data_dir / f"{platform}_{keywords}_{timestamp}.json"
+                with open(raw_data_file, "w", encoding="utf-8") as f:
+                    json.dump(items, f, ensure_ascii=False, indent=2, default=str)
+                print(f"[DEBUG] 处理后数据已保存: {raw_data_file}")
+            except Exception as e:
+                print(f"[DEBUG] 保存数据失败: {e}")
 
         # 生成舆情分析报告
         try:
@@ -1075,7 +1149,7 @@ async def crawl_multi_platform(
         max_count: 每个平台返回帖子数量，默认20，范围1-100
         is_get_comments: 是否爬取评论，默认False
         is_get_sub_comments: 是否爬取子评论，默认False
-        max_comments_count: 返回帖子下评论数量以及每个评论的子评论的数量，默认20，范围0-50
+        max_comments_count: 主评论数量，以及每个主评论下子评论的数量，默认20，范围0-50（主评论和子评论数量分别控制）
         save_data_option: 数据存储方式，可选值: ""(不存储), "db"(存储到数据库)，默认""
         report_type: 报告类型，可选值: "sentiment"(情感分析), "trend"(热门趋势), "hot_topics"(热门话题), "keyword"(关键词分析), "volume"(声量分析), "viral_spread"(传播分析), "influencer"(影响力账号), "audience"(用户画像), "comparison"(竞品对比), "risk"(舆情风险)，默认"sentiment"
 
@@ -1184,6 +1258,17 @@ async def crawl_multi_platform(
                 if raw_data:
                     items = process_platform_data(platform, raw_data)
                     if items:
+                        # 保存处理后数据到JSON文件
+                        try:
+                            raw_data_dir = PROJECT_ROOT / "original_data"
+                            raw_data_dir.mkdir(exist_ok=True)
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            raw_data_file = raw_data_dir / f"multi_{platform}_{keywords}_{timestamp}.json"
+                            with open(raw_data_file, "w", encoding="utf-8") as f:
+                                json.dump(items, f, ensure_ascii=False, indent=2, default=str)
+                            print(f"[DEBUG] 处理后数据已保存: {raw_data_file}")
+                        except Exception as e:
+                            print(f"[DEBUG] 保存数据失败: {e}")
                         all_platform_data[platform] = items
                         platform_names.append(PLATFORM_NAMES.get(platform, platform))
             except Exception as e:

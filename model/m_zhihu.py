@@ -19,7 +19,7 @@
 
 
 # -*- coding: utf-8 -*-
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -59,6 +59,7 @@ class ZhihuComment(BaseModel):
     publish_time: int = Field(default=0, description="Publish time")
     ip_location: Optional[str] = Field(default="", description="IP location")
     sub_comment_count: int = Field(default=0, description="Sub-comment count")
+    sub_comment_list: List["ZhihuComment"] = Field(default_factory=list, description="Sub-comment list")
     like_count: int = Field(default=0, description="Like count")
     dislike_count: int = Field(default=0, description="Dislike count")
     content_id: str = Field(default="", description="Content ID")

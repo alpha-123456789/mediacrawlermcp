@@ -181,7 +181,8 @@ class SmartReportGenerator:
         'bili': 'B站',
         'wb': '微博',
         'tieba': '百度贴吧',
-        'zhihu': '知乎'
+        'zhihu': '知乎',
+        'toutiao': '今日头条'
     }
 
     PLATFORM_ICONS = {
@@ -192,6 +193,7 @@ class SmartReportGenerator:
         'wb': '&#127760;',   # 🌐
         'tieba': '&#128204;', # 📌
         'zhihu': '&#128161;', # 💡
+        'toutiao': '&#128240;', # 📰
     }
 
     REPORT_TYPE_NAMES = {
@@ -235,6 +237,11 @@ class SmartReportGenerator:
         # 缓存分析结果
         self.sentiment_stats = {'positive': 0, 'negative': 0, 'neutral': 0}
         self.hot_words = []
+
+    def _get_standardized_value(self, item: Dict, standard_field: str) -> int:
+        """使用字段映射获取标准化值"""
+        from auto_field_detector import get_standardized_value
+        return get_standardized_value(item, self.analyzer.field_map, standard_field)
 
     def _auto_select_report_type(self, requested_type: str) -> str:
         """根据数据特征自动选择报告类型"""
@@ -424,27 +431,25 @@ class SmartReportGenerator:
         items = []
 
         for item in self.data[:10]:  # TOP 10
-            interact = item.get('interact_info', {})
-
             # 获取标题
             title = item.get('title', item.get('desc', item.get('caption', '无标题')))[:60]
 
             # 获取作者
             author = item.get('nickname', item.get('author', '匿名'))[:15]
 
-            # 构建统计信息（根据可用字段）
+            # 构建统计信息（使用字段映射获取标准化值）
             stats = []
 
             if self.features.get('has_likes'):
-                likes = interact.get('like_count', 0) or interact.get('digg_count', 0) or 0
+                likes = self._get_standardized_value(item, 'likes')
                 stats.append(f"&#10084;&#65039; {self._format_number(likes)}")
 
             if self.features.get('has_views'):
-                views = interact.get('view_count', 0) or interact.get('play_count', 0) or 0
+                views = self._get_standardized_value(item, 'views')
                 stats.append(f"&#128065; {self._format_number(views)}")
 
             if self.features.get('has_comments'):
-                comments = interact.get('comment_count', 0) or interact.get('comments_count', 0) or 0
+                comments = self._get_standardized_value(item, 'comments')
                 stats.append(f"&#128172; {self._format_number(comments)}")
 
             items.append({
@@ -1467,10 +1472,7 @@ class SmartReportGenerator:
             if not author or author == '未知':
                 continue
 
-            interact_info = item.get('interact_info', {})
-            likes = interact_info.get('likes', 0)
-            if isinstance(likes, str):
-                likes = int(likes) if likes.isdigit() else 0
+            likes = self._get_standardized_value(item, 'likes')
 
             if author not in author_stats:
                 author_stats[author] = {
@@ -1941,7 +1943,8 @@ class MultiPlatformReportGenerator:
         'bili': 'B站',
         'wb': '微博',
         'tieba': '百度贴吧',
-        'zhihu': '知乎'
+        'zhihu': '知乎',
+        'toutiao': '今日头条'
     }
 
     PLATFORM_ICONS = {
@@ -1952,6 +1955,7 @@ class MultiPlatformReportGenerator:
         'wb': '🌐',
         'tieba': '📌',
         'zhihu': '💡',
+        'toutiao': '📰',
     }
 
     REPORT_TYPE_NAMES = {
@@ -2002,6 +2006,11 @@ class MultiPlatformReportGenerator:
         # 缓存分析结果
         self.sentiment_stats = {'positive': 0, 'negative': 0, 'neutral': 0}
         self.hot_words = []
+
+    def _get_standardized_value(self, item: Dict, standard_field: str) -> int:
+        """使用字段映射获取标准化值"""
+        from auto_field_detector import get_standardized_value
+        return get_standardized_value(item, self.analyzer.field_map, standard_field)
 
     def _merge_platform_data(self):
         """合并多平台数据并统计各平台数据量"""
@@ -2188,25 +2197,23 @@ class MultiPlatformReportGenerator:
         for platform, data in self.platform_data.items():
             platform_name = self.PLATFORM_NAMES.get(platform, platform)
             for i, item in enumerate(data[:3], 1):  # 每个平台取TOP3
-                interact = item.get('interact_info', {})
-
                 # 获取标题
                 title = item.get('title', item.get('desc', item.get('caption', '无标题')))[:50]
 
                 # 获取作者
                 author = item.get('nickname', item.get('author', '匿名'))[:10]
 
-                # 构建统计信息
+                # 构建统计信息（使用字段映射获取标准化值）
                 stats = []
-                likes = interact.get('like_count', 0) or interact.get('digg_count', 0) or 0
+                likes = self._get_standardized_value(item, 'likes')
                 if likes:
                     stats.append(f"❤️ {self._format_number(likes)}")
 
-                views = interact.get('view_count', 0) or interact.get('play_count', 0) or 0
+                views = self._get_standardized_value(item, 'views')
                 if views:
                     stats.append(f"👁️ {self._format_number(views)}")
 
-                comments = interact.get('comment_count', 0) or interact.get('comments_count', 0) or 0
+                comments = self._get_standardized_value(item, 'comments')
                 if comments:
                     stats.append(f"💬 {self._format_number(comments)}")
 

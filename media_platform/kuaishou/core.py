@@ -59,7 +59,7 @@ class KuaishouCrawler(AbstractCrawler):
         self.user_agent = utils.get_user_agent()
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool, used for automatic proxy refresh
-        self.results = {"notes": [], "comments": {}}
+        self.results = {"notes": [], "comments": {}, "comment_counts": {}}
     async def start(self) -> list[dict]:
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
@@ -128,6 +128,9 @@ class KuaishouCrawler(AbstractCrawler):
             for note in self.results["notes"]:
                 video_id = note.get("photo", {}).get("id")
                 note["comments"] = self.results["comments"].get(video_id, [])
+                # V2 API 评论总数
+                if video_id in self.results["comment_counts"]:
+                    note["commentCountV2"] = self.results["comment_counts"][video_id]
             return self.results["notes"]
 
     async def search(self):
@@ -285,13 +288,20 @@ class KuaishouCrawler(AbstractCrawler):
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[KuaishouCrawler.get_comments] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds before fetching comments for video {video_id}")
 
-                comments = await self.ks_client.get_video_all_comments(
+                comments_result = await self.ks_client.get_video_all_comments(
                     photo_id=video_id,
                     crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
                     callback=kuaishou_store.batch_update_ks_video_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
+                    max_sub_comments_count=config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES,
                 )
-                self.results["comments"][video_id] = comments or []
+                # V2 API 可能返回 dict (含 commentCountV2) 或 list
+                if isinstance(comments_result, dict):
+                    comment_list = comments_result.get("comments", [])
+                    self.results["comment_counts"][video_id] = comments_result.get("commentCountV2", 0)
+                else:
+                    comment_list = comments_result or []
+                self.results["comments"][video_id] = comment_list
             except DataFetchError as ex:
                 utils.logger.error(
                     f"[KuaishouCrawler.get_comments] get video_id: {video_id} comment error: {ex}"

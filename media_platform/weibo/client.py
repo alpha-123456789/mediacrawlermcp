@@ -197,13 +197,15 @@ class WeiboClient(ProxyRefreshMixin):
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
         max_count: int = 10,
+        max_sub_comments_count: Optional[int] = None,
     ):
         """
         get note all comments include sub comments
         :param note_id:
         :param crawl_interval:
         :param callback:
-        :param max_count:
+        :param max_count: 主评论最大数量
+        :param max_sub_comments_count: 每条主评论下子评论最大数量，None 表示不限制
         :return:
         """
         result = []
@@ -222,8 +224,11 @@ class WeiboClient(ProxyRefreshMixin):
                 await callback(note_id, comment_list)
             await asyncio.sleep(crawl_interval)
             result.extend(comment_list)
-            sub_comment_result = await self.get_comments_all_sub_comments(note_id, comment_list, callback)
-            result.extend(sub_comment_result)
+            # 抓子评论，每个主评论下最多获取 max_sub_comments_count 条子评论
+            if config.ENABLE_GET_SUB_COMMENTS:
+                await self.get_comments_all_sub_comments(
+                    note_id, comment_list, callback, max_count=max_sub_comments_count
+                )
         return result
 
     @staticmethod
@@ -231,6 +236,7 @@ class WeiboClient(ProxyRefreshMixin):
         note_id: str,
         comment_list: List[Dict],
         callback: Optional[Callable] = None,
+        max_count: int = None,
     ) -> List[Dict]:
         """
         Get all sub-comments of comments
@@ -238,6 +244,7 @@ class WeiboClient(ProxyRefreshMixin):
             note_id:
             comment_list:
             callback:
+            max_count: Maximum number of sub-comments to crawl (None means no limit)
 
         Returns:
 
@@ -246,13 +253,17 @@ class WeiboClient(ProxyRefreshMixin):
             utils.logger.info(f"[WeiboClient.get_comments_all_sub_comments] Crawling sub_comment mode is not enabled")
             return []
 
-        res_sub_comments = []
+        all_sub_comments = []
         for comment in comment_list:
             sub_comments = comment.get("comments")
             if sub_comments and isinstance(sub_comments, list):
-                await callback(note_id, sub_comments)
-                res_sub_comments.extend(sub_comments)
-        return res_sub_comments
+                # 每个主评论下子评论受 max_count 限制
+                if max_count is not None and len(sub_comments) > max_count:
+                    sub_comments = sub_comments[:max_count]
+                if callback:
+                    await callback(note_id, sub_comments)
+                all_sub_comments.extend(sub_comments)
+        return all_sub_comments
 
     async def get_note_info_by_id(self, note_id: str) -> Dict:
         """

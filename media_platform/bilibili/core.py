@@ -365,6 +365,7 @@ class BilibiliCrawler(AbstractCrawler):
                     is_fetch_sub_comments=config.ENABLE_GET_SUB_COMMENTS,
                     callback=bilibili_store.batch_update_bilibili_video_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
+                    max_sub_comments_count=config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES,
                 )
                 self.results["comments"][video_id] = comments
 

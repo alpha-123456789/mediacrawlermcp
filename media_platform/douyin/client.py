@@ -243,6 +243,7 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         is_fetch_sub_comments=False,
         callback: Optional[Callable] = None,
         max_count: int = 10,
+        max_sub_comments_count: Optional[int] = None,
     ):
         """
         获取帖子的所有评论，包括子评论
@@ -250,7 +251,8 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         :param crawl_interval: 抓取间隔
         :param is_fetch_sub_comments: 是否抓取子评论
         :param callback: 回调函数，用于处理抓取到的评论
-        :param max_count: 一次帖子爬取的最大评论数量
+        :param max_count: 主评论最大数量
+        :param max_sub_comments_count: 每条主评论下子评论最大数量，None 表示不限制
         :return: 评论列表
         """
         result = []
@@ -272,7 +274,7 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
             await asyncio.sleep(crawl_interval)
             if not is_fetch_sub_comments:
                 continue
-            # Get secondary reviews
+            # Get secondary reviews, each main comment gets up to max_sub_comments_count sub-comments
             for comment in comments:
                 reply_comment_total = comment.get("reply_comment_total")
 
@@ -280,8 +282,11 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
                     comment_id = comment.get("cid")
                     sub_comments_has_more = 1
                     sub_comments_cursor = 0
+                    sub_count = 0
+                    collected_sub_comments = []
+                    sub_max = max_sub_comments_count if max_sub_comments_count is not None else max_count
 
-                    while sub_comments_has_more:
+                    while sub_comments_has_more and sub_count < sub_max:
                         sub_comments_res = await self.get_sub_comments(aweme_id, comment_id, sub_comments_cursor)
                         sub_comments_has_more = sub_comments_res.get("has_more", 0)
                         sub_comments_cursor = sub_comments_res.get("cursor", 0)
@@ -289,10 +294,19 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
 
                         if not sub_comments:
                             continue
-                        result.extend(sub_comments)
-                        if callback:  # If there is a callback function, execute the callback function
+                        # 限制子评论数量不超过 sub_max
+                        remaining = sub_max - sub_count
+                        if len(sub_comments) > remaining:
+                            sub_comments = sub_comments[:remaining]
+                        sub_count += len(sub_comments)
+                        collected_sub_comments.extend(sub_comments)
+                        if callback:
                             await callback(aweme_id, sub_comments)
                         await asyncio.sleep(crawl_interval)
+
+                    # 将完整子评论合并到一级评论的 reply_comment 字段
+                    if collected_sub_comments:
+                        comment["reply_comment"] = collected_sub_comments
         return result
 
     async def get_user_info(self, sec_user_id: str):

@@ -559,12 +559,11 @@ class ToutiaoCrawler(AbstractCrawler):
                 comments = await asyncio.wait_for(
                     self.tt_client.get_article_all_comments(
                         article_id=article_id,
-                        crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
                         is_fetch_sub_comments=config.ENABLE_GET_SUB_COMMENTS,
                         callback=toutiao_store.batch_update_toutiao_comments,
                         sub_comments_callback=toutiao_store.batch_update_toutiao_subcomments,
                         max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
-                        max_sub_comments_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES // 2,
+                        max_sub_comments_count=config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES,
                     ),
                     timeout=60
                 )

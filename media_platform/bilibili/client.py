@@ -259,6 +259,7 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         is_fetch_sub_comments=False,
         callback: Optional[Callable] = None,
         max_count: int = 10,
+        max_sub_comments_count: Optional[int] = None,
     ):
         """
         get video all comments include sub comments
@@ -266,8 +267,8 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         :param crawl_interval:
         :param is_fetch_sub_comments:
         :param callback:
-        max_count: Maximum number of comments to crawl per note
-
+        :param max_count: 主评论最大数量
+        :param max_sub_comments_count: 每条主评论下子评论最大数量，None 表示不限制
         :return:
         """
         result = []
@@ -310,19 +311,26 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
             if not isinstance(is_end, bool):
                 utils.logger.warning(f"[BilibiliClient.get_video_all_comments] 'is_end' is not a boolean for video_id: {video_id}. Assuming end of comments.")
                 is_end = True
+            # 添加一级评论到结果
+            if len(result) + len(comment_list) > max_count:
+                comment_list = comment_list[:max_count - len(result)]
+            if callback:
+                await callback(video_id, comment_list)
+            result.extend(comment_list)
+            await asyncio.sleep(crawl_interval)
+
+            # 抓取子评论（如果启用）
             if is_fetch_sub_comments:
                 for comment in comment_list:
                     comment_id = comment['rpid']
                     if (comment.get("rcount", 0) > 0):
-                        {await self.get_video_all_level_two_comments(video_id, comment_id, CommentOrderType.DEFAULT, 10, crawl_interval, callback)}
-            if len(result) + len(comment_list) > max_count:
-                comment_list = comment_list[:max_count - len(result)]
-            if callback:  # If there is a callback function, execute it
-                await callback(video_id, comment_list)
-            await asyncio.sleep(crawl_interval)
-            if not is_fetch_sub_comments:
-                result.extend(comment_list)
-                continue
+                        sub_comments = await self.get_video_all_level_two_comments(
+                            video_id, comment_id, CommentOrderType.DEFAULT, 10, crawl_interval, callback,
+                            max_count=max_sub_comments_count if max_sub_comments_count is not None else max_count  # 每个主评论下最多获取 max_sub_comments_count 条子评论
+                        )
+                        # 将完整子评论合并到一级评论的 replies 字段，替换 API 预览数据
+                        if sub_comments:
+                            comment["replies"] = sub_comments
         return result
 
     async def get_video_all_level_two_comments(
@@ -333,7 +341,8 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         ps: int = 10,
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
-    ) -> Dict:
+        max_count: int = 10,
+    ) -> List[Dict]:
         """
         get video all level two comments for a level one comment
         :param video_id: Video ID
@@ -342,20 +351,25 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         :param ps: Number of comments per page
         :param crawl_interval:
         :param callback:
+        :param max_count: Maximum number of sub-comments to crawl
         :return:
         """
-
+        result = []
         pn = 1
-        while True:
-            result = await self.get_video_level_two_comments(video_id, level_one_comment_id, pn, ps, order_mode)
-            comment_list: List[Dict] = result.get("replies", [])
+        while len(result) < max_count:
+            level_two_result = await self.get_video_level_two_comments(video_id, level_one_comment_id, pn, ps, order_mode)
+            comment_list: List[Dict] = level_two_result.get("replies", [])
+            if len(result) + len(comment_list) > max_count:
+                comment_list = comment_list[:max_count - len(result)]
             if callback:  # If there is a callback function, execute it
                 await callback(video_id, comment_list)
+            result.extend(comment_list)
             await asyncio.sleep(crawl_interval)
-            if (int(result["page"]["count"]) <= pn * ps):
+            if (int(level_two_result["page"]["count"]) <= pn * ps):
                 break
 
             pn += 1
+        return result
 
     async def get_video_level_two_comments(
         self,

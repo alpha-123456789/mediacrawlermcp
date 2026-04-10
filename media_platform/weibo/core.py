@@ -272,6 +272,7 @@ class WeiboCrawler(AbstractCrawler):
                     crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,  # Use fixed interval instead of random
                     callback=weibo_store.batch_update_weibo_note_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
+                    max_sub_comments_count=config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES,
                 )
                 self.results["comments"][note_id] = comments or []
             except DataFetchError as ex:

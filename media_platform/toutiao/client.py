@@ -645,8 +645,8 @@ class ToutiaoClient(AbstractApiClient, ProxyRefreshMixin):
         :param is_fetch_sub_comments: 是否获取子评论
         :param callback: 评论回调函数
         :param sub_comments_callback: 子评论回调函数
-        :param max_count: 最大评论数
-        :param max_sub_comments_count: 每条评论最大子评论数
+        :param max_count: 最大主评论数
+        :param max_sub_comments_count: 每条主评论下最多获取的子评论数量
         :return: 评论列表
         """
         result = []
@@ -688,49 +688,6 @@ class ToutiaoClient(AbstractApiClient, ProxyRefreshMixin):
                 # 格式化评论数据
                 formatted_comments = self._format_comments(comment_list)
 
-                # 获取子评论（并行处理，限制并发数为5）
-                if is_fetch_sub_comments:
-                    # 收集需要获取子评论的评论ID
-                    comments_with_replies = []
-                    for comment in formatted_comments:
-                        if comment.get("reply_count", 0) > 0:
-                            comments_with_replies.append(comment)
-                        else:
-                            comment["sub_comments"] = []
-                            comment["sub_comments_count"] = 0
-
-                    # 并行获取所有子评论（最多5个并发）
-                    if comments_with_replies:
-                        utils.logger.info(f"[ToutiaoClient.get_article_all_comments] 并行获取 {len(comments_with_replies)} 条评论的子评论（最多5并发）")
-
-                        semaphore = asyncio.Semaphore(5)
-
-                        async def fetch_replies_for_comment(comment: Dict) -> tuple:
-                            async with semaphore:
-                                comment_id = comment.get("comment_id")
-                                try:
-                                    sub_comments = await self.get_comment_all_replies(
-                                        comment_id=comment_id,
-                                        max_count=max_sub_comments_count,
-                                    )
-                                    if sub_comments_callback and sub_comments:
-                                        await sub_comments_callback(article_id, comment_id, sub_comments)
-                                    return (comment, sub_comments, None)
-                                except Exception as e:
-                                    utils.logger.warning(f"[ToutiaoClient.get_article_all_comments] 获取子评论失败: {comment_id}, {e}")
-                                    return (comment, [], e)
-
-                        # 并发执行所有子评论获取
-                        results = await asyncio.gather(
-                            *[fetch_replies_for_comment(c) for c in comments_with_replies],
-                            return_exceptions=True
-                        )
-
-                        # 处理结果
-                        for comment, sub_comments, error in results:
-                            comment["sub_comments"] = sub_comments
-                            comment["sub_comments_count"] = len(sub_comments)
-
                 # 限制数量
                 if len(formatted_comments) > max_count:
                     formatted_comments = formatted_comments[:max_count]
@@ -739,6 +696,15 @@ class ToutiaoClient(AbstractApiClient, ProxyRefreshMixin):
                     await callback(article_id, formatted_comments)
 
                 result.extend(formatted_comments)
+
+                # 获取子评论（如果启用），每个主评论下最多获取 max_sub_comments_count 条子评论
+                if is_fetch_sub_comments:
+                    await self._fetch_sub_comments_for_list(
+                        article_id=article_id,
+                        comments=result,
+                        max_sub_comments=max_sub_comments_count,
+                        sub_comments_callback=sub_comments_callback,
+                    )
                 success = True  # 成功获取，不重试
 
             except DataFetchError as e:
@@ -816,6 +782,63 @@ class ToutiaoClient(AbstractApiClient, ProxyRefreshMixin):
         :param reply_to_user_id: 回复目标用户ID（即父评论作者ID，从API响应的data.id获取）
         """
         return self._format_comments(comment_list, parent_id=parent_id, reply_to_user_id=reply_to_user_id)
+
+    async def _fetch_sub_comments_for_list(
+        self,
+        article_id: str,
+        comments: List[Dict],
+        max_sub_comments: int,
+        sub_comments_callback: Optional[Callable] = None,
+    ) -> None:
+        """
+        为评论列表获取子评论，每个主评论下最多获取 max_sub_comments 条子评论
+        :param article_id: 文章ID
+        :param comments: 评论列表
+        :param max_sub_comments: 每个主评论下最大子评论数
+        :param sub_comments_callback: 子评论回调函数
+        """
+        # 收集需要获取子评论的评论ID
+        comments_with_replies = []
+        for comment in comments:
+            if comment.get("reply_count", 0) > 0 and not comment.get("sub_comments"):
+                comments_with_replies.append(comment)
+            else:
+                comment["sub_comments"] = comment.get("sub_comments", [])
+                comment["sub_comments_count"] = len(comment["sub_comments"])
+
+        if not comments_with_replies:
+            return
+
+        utils.logger.info(f"[ToutiaoClient._fetch_sub_comments_for_list] 并行获取 {len(comments_with_replies)} 条评论的子评论（最多5并发），每个主评论下最多: {max_sub_comments} 条子评论")
+
+        semaphore = asyncio.Semaphore(5)
+
+        async def fetch_replies_per_comment(comment: Dict) -> tuple:
+            async with semaphore:
+                comment_id = comment.get("comment_id")
+                try:
+                    # 每个主评论下最多获取 max_sub_comments 条子评论
+                    sub_comments = await self.get_comment_all_replies(
+                        comment_id=comment_id,
+                        max_count=max_sub_comments,
+                    )
+                    if sub_comments_callback and sub_comments:
+                        await sub_comments_callback(article_id, comment_id, sub_comments)
+                    return (comment, sub_comments, None)
+                except Exception as e:
+                    utils.logger.warning(f"[ToutiaoClient._fetch_sub_comments_for_list] 获取子评论失败: {comment_id}, {e}")
+                    return (comment, [], e)
+
+        # 并发执行所有子评论获取
+        results = await asyncio.gather(
+            *[fetch_replies_per_comment(c) for c in comments_with_replies],
+            return_exceptions=True
+        )
+
+        # 处理结果
+        for comment, sub_comments, error in results:
+            comment["sub_comments"] = sub_comments
+            comment["sub_comments_count"] = len(sub_comments)
 
     async def get_creator_info(self, creator_id: str) -> Dict:
         """

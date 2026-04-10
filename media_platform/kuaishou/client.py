@@ -222,23 +222,29 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
         max_count: int = 10,
+        max_sub_comments_count: Optional[int] = None,
     ):
         """
         Get video all comments including sub comments (V2 REST API)
         :param photo_id: video id
         :param crawl_interval: delay between requests (seconds)
         :param callback: callback function for processing comments
-        :param max_count: max number of comments to fetch
+        :param max_count: 主评论最大数量
+        :param max_sub_comments_count: 每条主评论下子评论最大数量，None 表示不限制
         :return: list of all comments
         """
 
         result = []
         pcursor = ""
+        comment_count_v2 = 0
 
         while pcursor != "no_more" and len(result) < max_count:
             comments_res = await self.get_video_comments(photo_id, pcursor)
             # V2 API returns data at top level, not nested in visionCommentList
             pcursor = comments_res.get("pcursorV2", "no_more")
+            # 保留评论总数（V2 API 在首次响应中返回）
+            if not comment_count_v2:
+                comment_count_v2 = comments_res.get("commentCountV2", 0)
             comments = comments_res.get("rootCommentsV2", [])
             if len(result) + len(comments) > max_count:
                 comments = comments[: max_count - len(result)]
@@ -246,10 +252,20 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
                 await callback(photo_id, comments)
             result.extend(comments)
             await asyncio.sleep(crawl_interval)
-            sub_comments = await self.get_comments_all_sub_comments(
-                comments, photo_id, crawl_interval, callback
-            )
-            result.extend(sub_comments)
+            # 抓子评论，每个主评论下最多获取 max_sub_comments_count 条子评论
+            if config.ENABLE_GET_SUB_COMMENTS:
+                sub_comment_map = await self.get_comments_all_sub_comments(
+                    comments, photo_id, crawl_interval, callback, max_count=max_sub_comments_count if max_sub_comments_count is not None else max_count
+                )
+                # 将完整子评论合并到对应一级评论的 subComments 字段
+                if sub_comment_map:
+                    for comment in comments:
+                        comment_id = comment.get("comment_id")
+                        if comment_id in sub_comment_map:
+                            comment["subCommentsV2"] = sub_comment_map[comment_id]
+        # 将评论总数注入到结果中，供下游使用
+        if comment_count_v2:
+            return {"comments": result, "commentCountV2": comment_count_v2}
         return result
 
     async def get_comments_all_sub_comments(
@@ -258,7 +274,8 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
         photo_id,
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
-    ) -> List[Dict]:
+        max_count: int = None,
+    ) -> Dict[str, List[Dict]]:
         """
         Get all second-level comments under specified first-level comments (V2 REST API)
         Args:
@@ -266,16 +283,17 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
             photo_id: Video ID
             crawl_interval: Delay unit for crawling comments once (seconds)
             callback: Callback after one comment crawl ends
+            max_count: Maximum number of sub-comments to crawl (None means no limit)
         Returns:
-            List of sub comments
+            Dict mapping comment_id -> list of sub-comments
         """
         if not config.ENABLE_GET_SUB_COMMENTS:
             utils.logger.info(
                 f"[KuaiShouClient.get_comments_all_sub_comments] Crawling sub_comment mode is not enabled"
             )
-            return []
+            return {}
 
-        result = []
+        sub_comment_map = {}
         for comment in comments:
             # V2 API uses hasSubComments (boolean) instead of subCommentsPcursor (string)
             has_sub_comments = comment.get("hasSubComments", False)
@@ -287,9 +305,10 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
             if not root_comment_id:
                 continue
 
+            per_comment_result = []
             sub_comment_pcursor = ""
 
-            while sub_comment_pcursor != "no_more":
+            while sub_comment_pcursor != "no_more" and (max_count is None or len(per_comment_result) < max_count):
                 comments_res = await self.get_video_sub_comments(
                     photo_id, root_comment_id, sub_comment_pcursor
                 )
@@ -297,11 +316,20 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
                 sub_comment_pcursor = comments_res.get("pcursorV2", "no_more")
                 sub_comments = comments_res.get("subCommentsV2", [])
 
+                # 每个主评论下子评论受 max_count 限制
+                if max_count is not None and len(per_comment_result) + len(sub_comments) > max_count:
+                    sub_comments = sub_comments[:max_count - len(per_comment_result)]
+
                 if callback and sub_comments:
                     await callback(photo_id, sub_comments)
                 await asyncio.sleep(crawl_interval)
-                result.extend(sub_comments)
-        return result
+                per_comment_result.extend(sub_comments)
+                # 达到限制后退出
+                if max_count is not None and len(per_comment_result) >= max_count:
+                    break
+            if per_comment_result:
+                sub_comment_map[root_comment_id] = per_comment_result
+        return sub_comment_map
 
     async def get_creator_info(self, user_id: str) -> Dict:
         """

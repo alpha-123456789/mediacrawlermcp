@@ -250,9 +250,10 @@ class ZhihuCrawler(AbstractCrawler):
                 content=content_item,
                 crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
                 callback=zhihu_store.batch_update_zhihu_note_comments,
+                max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
+                max_sub_comments_count=config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES,
             )
             self.results["comments"][content_item.content_id] = [c.model_dump() if hasattr(c, 'model_dump') else c.dict() for c in comments] if comments else []
-            self.results["comments"] = self.results["comments"][:config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES]
     async def get_creators_and_notes(self) -> None:
         """
         Get creator's information and their notes and comments

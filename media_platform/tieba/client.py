@@ -12,28 +12,27 @@
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
 # 3. 不得进行大规模爬取或对平台造成运营干扰。
 # 4. 应合理控制请求频率，避免给目标平台带来不必要的负担。
-# 5. 不得用于任何非法或不当的用途。
+# 5. 不得用于任何非法或不当目的。
 #
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
-import asyncio
-import json
-from typing import Any, Callable, Dict, List, Optional, Union
+import re
+from datetime import datetime
+from typing import Dict, List, Optional
 from urllib.parse import urlencode, quote
 
-import requests
-from playwright.async_api import BrowserContext, Page
+import httpx
+from aiotieba.helper.crypto import sign as aiotieba_sign
 from tenacity import RetryError, retry, stop_after_attempt, wait_fixed
 
 import config
 from base.base_crawler import AbstractApiClient
-from model.m_baidu_tieba import TiebaComment, TiebaCreator, TiebaNote
+from model.m_baidu_tieba import TiebaComment, TiebaNote
 from proxy.proxy_ip_pool import ProxyIpPool
 from tools import utils
 
 from .field import SearchNoteType, SearchSortType
-from .help import TieBaExtractor
 
 
 class BaiduTieBaClient(AbstractApiClient):
@@ -44,669 +43,431 @@ class BaiduTieBaClient(AbstractApiClient):
         ip_pool=None,
         default_ip_proxy=None,
         headers: Dict[str, str] = None,
-        playwright_page: Optional[Page] = None,
+        playwright_page=None,  # kept for interface compat, no longer used
     ):
         self.ip_pool: Optional[ProxyIpPool] = ip_pool
         self.timeout = timeout
-        # Use provided headers (including real browser UA) or default headers
         self.headers = headers or {
             "User-Agent": utils.get_user_agent(),
-            "Cookie": "",
         }
         self._host = "https://tieba.baidu.com"
-        self._page_extractor = TieBaExtractor()
         self.default_ip_proxy = default_ip_proxy
-        self.playwright_page = playwright_page  # Playwright page object
+        self.playwright_page = playwright_page
 
-    def _sync_request(self, method, url, proxy=None, **kwargs):
-        """
-        Synchronous requests method
-        Args:
-            method: Request method
-            url: Request URL
-            proxy: Proxy IP
-            **kwargs: Other request parameters
-
-        Returns:
-            Response object
-        """
-        # Construct proxy dictionary
-        proxies = None
-        if proxy:
-            proxies = {
-                "http": proxy,
-                "https": proxy,
-            }
-
-        # Send request
-        response = requests.request(
-            method=method,
-            url=url,
-            headers=self.headers,
-            proxies=proxies,
-            timeout=self.timeout,
-            **kwargs
-        )
-        return response
-
-    async def _refresh_proxy_if_expired(self) -> None:
-        """
-        Check if proxy is expired and automatically refresh if necessary
-        """
-        if self.ip_pool is None:
-            return
-
-        if self.ip_pool.is_current_proxy_expired():
-            utils.logger.info(
-                "[BaiduTieBaClient._refresh_proxy_if_expired] Proxy expired, refreshing..."
-            )
-            new_proxy = await self.ip_pool.get_or_refresh_proxy()
-            # Update proxy URL
-            _, self.default_ip_proxy = utils.format_proxy_info(new_proxy)
-            utils.logger.info(
-                f"[BaiduTieBaClient._refresh_proxy_if_expired] New proxy: {new_proxy.ip}:{new_proxy.port}"
-            )
+    # ------------------------------------------------------------------
+    #  Search API  /mo/q/search/thread  (no auth needed)
+    # ------------------------------------------------------------------
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
-    async def request(self, method, url, return_ori_content=False, proxy=None, **kwargs) -> Union[str, Any]:
-        """
-        Common request method wrapper for requests, handles request responses
-        Args:
-            method: Request method
-            url: Request URL
-            return_ori_content: Whether to return original content
-            proxy: Proxy IP
-            **kwargs: Other request parameters, such as headers, request body, etc.
-
-        Returns:
-
-        """
-        # Check if proxy is expired before each request
-        await self._refresh_proxy_if_expired()
-
-        actual_proxy = proxy if proxy else self.default_ip_proxy
-
-        # Execute synchronous requests in thread pool
-        response = await asyncio.to_thread(
-            self._sync_request,
-            method,
-            url,
-            actual_proxy,
-            **kwargs
-        )
-
-        if response.status_code != 200:
-            utils.logger.error(f"Request failed, method: {method}, url: {url}, status code: {response.status_code}")
-            utils.logger.error(f"Request failed, response: {response.text}")
-            raise Exception(f"Request failed, method: {method}, url: {url}, status code: {response.status_code}")
-
-        if response.text == "" or response.text == "blocked":
-            utils.logger.error(f"request params incorrect, response.text: {response.text}")
-            raise Exception("account blocked")
-
-        if return_ori_content:
-            return response.text
-
-        return response.json()
-
-    async def get(self, uri: str, params=None, return_ori_content=False, **kwargs) -> Any:
-        """
-        GET request with header signing
-        Args:
-            uri: Request route
-            params: Request parameters
-            return_ori_content: Whether to return original content
-
-        Returns:
-
-        """
-        final_uri = uri
-        if isinstance(params, dict):
-            final_uri = (f"{uri}?"
-                         f"{urlencode(params)}")
-        try:
-            res = await self.request(method="GET", url=f"{self._host}{final_uri}", return_ori_content=return_ori_content, **kwargs)
-            return res
-        except RetryError as e:
-            if self.ip_pool:
-                proxie_model = await self.ip_pool.get_proxy()
-                _, proxy = utils.format_proxy_info(proxie_model)
-                res = await self.request(method="GET", url=f"{self._host}{final_uri}", return_ori_content=return_ori_content, proxy=proxy, **kwargs)
-                self.default_ip_proxy = proxy
-                return res
-
-            utils.logger.error(f"[BaiduTieBaClient.get] Reached maximum retry attempts, IP is blocked, please try a new IP proxy: {e}")
-            raise Exception(f"[BaiduTieBaClient.get] Reached maximum retry attempts, IP is blocked, please try a new IP proxy: {e}")
-
-    async def post(self, uri: str, data: dict, **kwargs) -> Dict:
-        """
-        POST request with header signing
-        Args:
-            uri: Request route
-            data: Request body parameters
-
-        Returns:
-
-        """
-        json_str = json.dumps(data, separators=(',', ':'), ensure_ascii=False)
-        return await self.request(method="POST", url=f"{self._host}{uri}", data=json_str, **kwargs)
-
-    async def pong(self, browser_context: BrowserContext = None) -> bool:
-        """
-        Check if login state is still valid
-        Uses Cookie detection instead of API calls to avoid detection
-        Args:
-            browser_context: Browser context object
-
-        Returns:
-            bool: True if logged in, False if not logged in
-        """
-        utils.logger.info("[BaiduTieBaClient.pong] Begin to check tieba login state by cookies...")
-
-        if not browser_context:
-            utils.logger.warning("[BaiduTieBaClient.pong] browser_context is None, assume not logged in")
-            return False
-
-        try:
-            # Get cookies from browser and check key login cookies
-            _, cookie_dict = utils.convert_cookies(await browser_context.cookies())
-
-            # Baidu Tieba login identifiers: STOKEN or PTOKEN
-            stoken = cookie_dict.get("STOKEN")
-            ptoken = cookie_dict.get("PTOKEN")
-            bduss = cookie_dict.get("BDUSS")  # Baidu universal login cookie
-
-            if stoken or ptoken or bduss:
-                utils.logger.info(f"[BaiduTieBaClient.pong] Login state verified by cookies (STOKEN: {bool(stoken)}, PTOKEN: {bool(ptoken)}, BDUSS: {bool(bduss)})")
-                return True
-            else:
-                utils.logger.info("[BaiduTieBaClient.pong] No valid login cookies found, need to login")
-                return False
-
-        except Exception as e:
-            utils.logger.error(f"[BaiduTieBaClient.pong] Check login state failed: {e}, assume not logged in")
-            return False
-
-    async def update_cookies(self, browser_context: BrowserContext):
-        """
-        Update cookies method provided by API client, usually called after successful login
-        Args:
-            browser_context: Browser context object
-
-        Returns:
-
-        """
-        cookie_str, cookie_dict = utils.convert_cookies(await browser_context.cookies())
-        self.headers["Cookie"] = cookie_str
-        utils.logger.info("[BaiduTieBaClient.update_cookies] Cookie has been updated")
-
     async def get_notes_by_keyword(
         self,
         keyword: str,
         page: int = 1,
-        page_size: int = 10,
+        page_size: int = 20,
         sort: SearchSortType = SearchSortType.TIME_DESC,
         note_type: SearchNoteType = SearchNoteType.FIXED_THREAD,
     ) -> List[TiebaNote]:
         """
-        Search Tieba posts by keyword (uses Playwright to access page, avoiding API detection)
-        Args:
-            keyword: Keyword
-            page: Page number
-            page_size: Page size
-            sort: Result sort method
-            note_type: Post type (main thread | main thread + reply mixed mode)
-        Returns:
-
+        Search Tieba posts by keyword using /mo/q/search/thread API.
+        No login or sign required.
         """
-        if not self.playwright_page:
-            utils.logger.error("[BaiduTieBaClient.get_notes_by_keyword] playwright_page is None, cannot use browser mode")
-            raise Exception("playwright_page is required for browser-based search")
-
-        # Construct search URL
-        # Example: https://tieba.baidu.com/f/search/res?ie=utf-8&qw=keyword
-        search_url = f"{self._host}/f/search/res"
         params = {
-            "ie": "utf-8",
-            "qw": keyword,
-            "rn": page_size,
-            "pn": page,
-            "sm": sort.value,
-            "only_thread": note_type.value,
+            "rn": str(page_size),
+            "st": sort.value,
+            "word": keyword,
+            "pn": str(page),
         }
+        url = f"{self._host}/mo/q/search/thread?{urlencode(params)}"
+        utils.logger.info(f"[BaiduTieBaClient.get_notes_by_keyword] API request: {url}")
 
-        # Concatenate full URL
-        full_url = f"{search_url}?{urlencode(params)}"
-        utils.logger.info(f"[BaiduTieBaClient.get_notes_by_keyword] Accessing search page: {full_url}")
+        async with httpx.AsyncClient(timeout=self.timeout, proxy=self.default_ip_proxy) as client:
+            resp = await client.get(url, headers=self.headers)
 
-        try:
-            # Use Playwright to access search page
-            await self.playwright_page.goto(full_url, wait_until="domcontentloaded")
+        if resp.status_code != 200:
+            raise Exception(f"Search API returned status {resp.status_code}")
 
-            # Wait for page loading, using delay setting from config file
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+        data = resp.json()
+        if data.get("no") != 0:
+            raise Exception(f"Search API error: {data.get('error', 'unknown')}")
 
-            # Click "贴" tab to get note list
-            try:
-                utils.logger.info("[BaiduTieBaClient.get_notes_by_keyword] Clicking '贴' tab...")
+        post_list = data.get("data", {}).get("post_list", [])
+        # API may return more items than requested rn; truncate
+        if len(post_list) > page_size:
+            post_list = post_list[:page_size]
 
-                # Try multiple selectors to find the "贴" tab
-                tab_selectors = [
-                    '.tab-item:has-text("贴")',
-                    '.card-tab .tab-item:nth-child(2)',
-                    '.tab-item.active',
-                    'text=贴',
-                ]
+        notes: List[TiebaNote] = []
 
-                tab_clicked = False
-                for selector in tab_selectors:
-                    try:
-                        tab_element = await self.playwright_page.wait_for_selector(selector, timeout=5000)
-                        if tab_element:
-                            # Check if it contains "贴" text
-                            text_content = await tab_element.text_content()
-                            if "贴" in text_content:
-                                await tab_element.click()
-                                utils.logger.info(f"[BaiduTieBaClient.get_notes_by_keyword] Clicked '贴' tab with selector: {selector}")
-                                tab_clicked = True
-                                break
-                    except Exception:
-                        continue
+        for post in post_list:
+            tid = str(post.get("tid", ""))
+            title = post.get("title", "")
+            content = post.get("content", "")
+            post_num = post.get("post_num", 0)
+            like_num = post.get("like_num", 0)
+            create_time = post.get("create_time", 0)
+            forum_name = post.get("forum_name", "")
+            forum_id = post.get("forum_id", 0)
+            pb_url = post.get("pb_url", "")
 
-                if not tab_clicked:
-                    utils.logger.warning("[BaiduTieBaClient.get_notes_by_keyword] Could not find '贴' tab, proceeding without click")
+            user_info = post.get("user", {})
+            user_nickname = user_info.get("show_nickname", user_info.get("user_name", ""))
+            user_id = user_info.get("user_id", "")
+            portrait = user_info.get("portrait", "")
+            user_avatar = f"https://gss0.bdstatic.com/6LZ1dD3d1sgCo2Kml5_Y_D3/sys/portrait/item/{portrait}" if portrait else ""
 
-                # Wait for content to load after clicking tab
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-
-                # Wait for thread content to appear
+            publish_time = ""
+            if create_time:
                 try:
-                    await self.playwright_page.wait_for_selector(".thread-content", timeout=10000)
-                    utils.logger.info("[BaiduTieBaClient.get_notes_by_keyword] Thread content loaded")
+                    publish_time = datetime.fromtimestamp(create_time).strftime("%Y-%m-%d %H:%M:%S")
                 except Exception:
-                    utils.logger.warning("[BaiduTieBaClient.get_notes_by_keyword] Thread content not found, proceeding anyway")
+                    publish_time = str(create_time)
 
-            except Exception as tab_err:
-                utils.logger.warning(f"[BaiduTieBaClient.get_notes_by_keyword] Error clicking '贴' tab: {tab_err}, proceeding anyway")
+            tieba_link = f"{self._host}/f?kw={quote(forum_name)}" if forum_name else ""
+            note_url = pb_url or f"{self._host}/p/{tid}"
 
-            # Get page HTML content
-            page_content = await self.playwright_page.content()
-            utils.logger.info(f"[BaiduTieBaClient.get_notes_by_keyword] Successfully retrieved search page HTML, length: {len(page_content)}")
+            notes.append(TiebaNote(
+                note_id=tid,
+                title=title,
+                desc=content[:500] if content else "",
+                note_url=note_url,
+                publish_time=publish_time,
+                user_link=f"{self._host}/home/main?id={portrait}" if portrait else "",
+                user_nickname=user_nickname,
+                user_avatar=user_avatar,
+                tieba_name=forum_name,
+                tieba_link=tieba_link,
+                total_replay_num=post_num,
+                total_replay_page=(post_num + 9) // 10 if post_num else 0,
+                like_count=like_num,
+                ip_location="",
+            ))
 
-            # Extract search results
-            notes = self._page_extractor.extract_search_note_list(page_content)
-            utils.logger.info(f"[BaiduTieBaClient.get_notes_by_keyword] Extracted {len(notes)} posts")
-            return notes
+        utils.logger.info(f"[BaiduTieBaClient.get_notes_by_keyword] Got {len(notes)} posts")
+        return notes
 
-        except Exception as e:
-            utils.logger.error(f"[BaiduTieBaClient.get_notes_by_keyword] Search failed: {e}")
-            raise
+    # ------------------------------------------------------------------
+    #  Detail + Comments API  /c/f/pb/page  (aiotieba sign, no login)
+    # ------------------------------------------------------------------
 
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
     async def get_note_by_id(self, note_id: str) -> TiebaNote:
         """
-        Get post details by post ID (uses Playwright to access page, avoiding API detection)
-        Args:
-            note_id: Post ID
-
-        Returns:
-            TiebaNote: Post detail object
+        Get post detail using /c/f/pb/page API with aiotieba sign.
+        Also fetches first-page comments with embedded sub-comments.
         """
-        if not self.playwright_page:
-            utils.logger.error("[BaiduTieBaClient.get_note_by_id] playwright_page is None, cannot use browser mode")
-            raise Exception("playwright_page is required for browser-based note detail fetching")
+        page_data, user_map = await self._fetch_page(note_id, pn=1, rn=30)
 
-        # Construct post detail URL
-        note_url = f"{self._host}/p/{note_id}"
-        utils.logger.info(f"[BaiduTieBaClient.get_note_by_id] Accessing post detail page: {note_url}")
+        thread = page_data.get("thread", {})
+        forum = page_data.get("forum", {})
+        first_floor = page_data.get("first_floor", {})
+        post_list = page_data.get("post_list", [])
 
-        try:
-            # Use Playwright to access post detail page
-            await self.playwright_page.goto(note_url, wait_until="domcontentloaded")
+        # Thread info
+        title = thread.get("title", "") or first_floor.get("title", "")
+        reply_num = thread.get("reply_num", 0)
+        agree_num = thread.get("agree_num", 0)
+        collect_num = thread.get("collect_num", 0)
+        create_time = thread.get("create_time", 0)
 
-            # Wait for page loading, using delay setting from config file
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+        # First floor (OP) content — may be in first_floor or in post_list[0]
+        ff_content_items = first_floor.get("content", [])
+        if not ff_content_items and post_list:
+            ff_content_items = post_list[0].get("content", [])
+        desc = self._extract_text(ff_content_items)
 
-            # Get page HTML content
-            page_content = await self.playwright_page.content()
-            utils.logger.info(f"[BaiduTieBaClient.get_note_by_id] Successfully retrieved post detail HTML, length: {len(page_content)}")
+        # OP author — try thread.author first, then first_floor, then post_list[0]
+        author_info = thread.get("author") or first_floor.get("author")
+        if not author_info and post_list:
+            author_info = post_list[0].get("author")
+        ff_author_id = first_floor.get("author_id")
+        if not author_info and ff_author_id:
+            author_info = user_map.get(ff_author_id, {})
 
-            # Extract post details
-            note_detail = self._page_extractor.extract_note_detail(page_content)
-            return note_detail
+        user_nickname = self._get_author_name(author_info)
+        portrait = (author_info or {}).get("portrait", "")
+        user_avatar = f"https://gss0.bdstatic.com/6LZ1dD3d1sgCo2Kml5_Y_D3/sys/portrait/item/{portrait}" if portrait else ""
+        ip_location = (author_info or {}).get("ip_address", "") or ""
 
-        except Exception as e:
-            utils.logger.error(f"[BaiduTieBaClient.get_note_by_id] Failed to get post details: {e}")
-            raise
+        publish_time = ""
+        if create_time:
+            try:
+                publish_time = datetime.fromtimestamp(create_time).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                publish_time = str(create_time)
+
+        forum_name = forum.get("name", "")
+        forum_id = forum.get("id", 0)
+        tieba_link = f"{self._host}/f?kw={quote(forum_name)}" if forum_name else ""
+
+        return TiebaNote(
+            note_id=str(note_id),
+            title=title,
+            desc=desc,
+            note_url=f"{self._host}/p/{note_id}",
+            publish_time=publish_time,
+            user_link=f"{self._host}/home/main?id={portrait}" if portrait else "",
+            user_nickname=user_nickname,
+            user_avatar=user_avatar,
+            tieba_name=forum_name,
+            tieba_link=tieba_link,
+            total_replay_num=reply_num,
+            total_replay_page=page_data.get("page", {}).get("total_page", 0),
+            like_count=agree_num,
+            collect_count=collect_num,
+            ip_location=ip_location,
+        )
 
     async def get_note_all_comments(
         self,
         note_detail: TiebaNote,
         crawl_interval: float = 1.0,
-        callback: Optional[Callable] = None,
+        callback=None,
         max_count: int = 10,
+        max_sub_comments_count: Optional[int] = None,
     ) -> List[TiebaComment]:
         """
-        Get all first-level comments for specified post (uses Playwright to access page, avoiding API detection)
-        Args:
-            note_detail: Post detail object
-            crawl_interval: Crawl delay interval in seconds
-            callback: Callback function after one post crawl completes
-            max_count: Maximum number of comments to crawl per post
-        Returns:
-            List[TiebaComment]: Comment list
+        Get comments using /c/f/pb/page API with aiotieba sign.
+        Paginates through comment pages. Each page returns comments
+        with a few embedded sub-comments (with_floor=1).
         """
-        if not self.playwright_page:
-            utils.logger.error("[BaiduTieBaClient.get_note_all_comments] playwright_page is None, cannot use browser mode")
-            raise Exception("playwright_page is required for browser-based comment fetching")
-
         result: List[TiebaComment] = []
-        seen_comment_ids: set = set()  # Track already fetched comment IDs
+        total_pages = note_detail.total_replay_page
+        if total_pages == 0 and note_detail.total_replay_num > 0:
+            total_pages = (note_detail.total_replay_num + 29) // 30
+
         current_page = 1
-        while note_detail.total_replay_page >= current_page and len(result) < max_count:
-            # Construct comment page URL
-            comment_url = f"{self._host}/p/{note_detail.note_id}?pn={current_page}"
-            utils.logger.info(f"[BaiduTieBaClient.get_note_all_comments] Accessing comment page: {comment_url}")
-
+        while current_page <= total_pages and len(result) < max_count:
             try:
-                # Use Playwright to access comment page
-                await self.playwright_page.goto(comment_url, wait_until="domcontentloaded")
+                page_data, user_map = await self._fetch_page(
+                    note_detail.note_id, pn=current_page, rn=30
+                )
+                post_list = page_data.get("post_list", [])
 
-                # Wait for page loading, using delay setting from config file
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                if not post_list:
+                    break
 
-                # Get page HTML content
-                page_content = await self.playwright_page.content()
-
-                # Extract comments
-                comments = self._page_extractor.extract_tieba_note_parment_comments(
-                    page_content, note_id=note_detail.note_id
+                comments = self._parse_comments(
+                    post_list, user_map, note_detail
                 )
 
-                if not comments:
-                    utils.logger.info(f"[BaiduTieBaClient.get_note_all_comments] Page {current_page} has no comments, stopping crawl")
-                    break
-
-                # Check for duplicate comments (indicates reached last page)
-                new_comments = [c for c in comments if c.comment_id not in seen_comment_ids]
-                if not new_comments:
-                    utils.logger.info(f"[BaiduTieBaClient.get_note_all_comments] Page {current_page} comments are all duplicates, reached last page")
-                    break
-
-                # Track seen comment IDs
-                for c in new_comments:
-                    seen_comment_ids.add(c.comment_id)
-
-                # Limit comment count
-                if len(result) + len(new_comments) > max_count:
-                    new_comments = new_comments[:max_count - len(result)]
+                # Limit
+                remaining = max_count - len(result)
+                comments = comments[:remaining]
 
                 if callback:
-                    await callback(note_detail.note_id, new_comments)
+                    await callback(note_detail.note_id, comments)
 
-                result.extend(new_comments)
-
-                # Get all sub-comments
-                await self.get_comments_all_sub_comments(
-                    comments, crawl_interval=crawl_interval, callback=callback
-                )
-
-                await asyncio.sleep(crawl_interval)
+                result.extend(comments)
                 current_page += 1
 
+                import asyncio
+                await asyncio.sleep(crawl_interval)
+
             except Exception as e:
-                utils.logger.error(f"[BaiduTieBaClient.get_note_all_comments] Failed to get page {current_page} comments: {e}")
+                utils.logger.error(
+                    f"[BaiduTieBaClient.get_note_all_comments] Page {current_page} failed: {e}"
+                )
                 break
 
-        utils.logger.info(f"[BaiduTieBaClient.get_note_all_comments] Total retrieved {len(result)} first-level comments")
+        utils.logger.info(
+            f"[BaiduTieBaClient.get_note_all_comments] Got {len(result)} comments for note {note_detail.note_id}"
+        )
         return result
+
+    # ------------------------------------------------------------------
+    #  Internal helpers
+    # ------------------------------------------------------------------
+
+    async def _fetch_page(
+        self, kz: str, pn: int = 1, rn: int = 30
+    ) -> tuple:
+        """
+        Fetch a page from /c/f/pb/page with aiotieba sign.
+        Returns (cleaned_json_dict, user_map).
+        """
+        data = [
+            ("kz", str(kz)),
+            ("pn", str(pn)),
+            ("rn", str(rn)),
+            ("with_floor", "1"),
+        ]
+        signed_data = aiotieba_sign(data)
+        form_data = {k: v for k, v in signed_data}
+
+        async with httpx.AsyncClient(timeout=self.timeout, proxy=self.default_ip_proxy) as client:
+            resp = await client.post(
+                f"{self._host}/c/f/pb/page",
+                data=form_data,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                    "User-Agent": self.headers.get("User-Agent", "aiotieba/4.6.4"),
+                },
+            )
+
+        if resp.status_code != 200:
+            raise Exception(f"Page API returned status {resp.status_code}")
+
+        cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", resp.text)
+        d = __import__("json").loads(cleaned)
+
+        error_code = d.get("error_code")
+        if error_code and error_code != 0:
+            raise Exception(f"Page API error_code={error_code}, msg={d.get('error_msg', '')}")
+
+        user_list = d.get("user_list", [])
+        user_map = {u.get("id"): u for u in user_list}
+
+        return d, user_map
+
+    def _parse_comments(
+        self,
+        post_list: list,
+        user_map: dict,
+        note_detail: TiebaNote,
+    ) -> List[TiebaComment]:
+        """Parse post_list from /c/f/pb/page into TiebaComment objects."""
+        comments: List[TiebaComment] = []
+
+        for post in post_list:
+            pid = str(post.get("id", ""))
+            author_id = post.get("author_id")
+            content_items = post.get("content", [])
+            text = self._extract_text(content_items)
+            timestamp = post.get("time", 0)
+            agree = post.get("agree", {})
+            agree_num = agree.get("agree_num", 0) if isinstance(agree, dict) else 0
+            sub_post_number = post.get("sub_post_number", 0)
+
+            # Author info — prefer inline author, fallback to user_map
+            author = post.get("author") or user_map.get(author_id, {})
+            user_nickname = self._get_author_name(author)
+            portrait = (author or {}).get("portrait", "")
+            user_avatar = f"https://gss0.bdstatic.com/6LZ1dD3d1sgCo2Kml5_Y_D3/sys/portrait/item/{portrait}" if portrait else ""
+            ip_location = (author or {}).get("ip_address", "") or ""
+
+            publish_time = ""
+            if timestamp:
+                try:
+                    publish_time = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    publish_time = str(timestamp)
+
+            # Parse embedded sub-comments
+            sub_comments: List[TiebaComment] = []
+            sub_post_data = post.get("sub_post_list")
+            if isinstance(sub_post_data, dict):
+                for sp in sub_post_data.get("sub_post_list", []):
+                    sp_id = str(sp.get("id", ""))
+                    sp_author = sp.get("author") or {}
+                    sp_nickname = self._get_author_name(sp_author)
+                    sp_portrait = sp_author.get("portrait", "")
+                    sp_avatar = f"https://gss0.bdstatic.com/6LZ1dD3d1sgCo2Kml5_Y_D3/sys/portrait/item/{sp_portrait}" if sp_portrait else ""
+                    sp_ip = sp_author.get("ip_address", "") or ""
+                    sp_text = self._extract_text(sp.get("content", []))
+                    sp_time = sp.get("time", 0)
+                    sp_time_str = ""
+                    if sp_time:
+                        try:
+                            sp_time_str = datetime.fromtimestamp(sp_time).strftime("%Y-%m-%d %H:%M:%S")
+                        except Exception:
+                            sp_time_str = str(sp_time)
+                    sp_agree = sp.get("agree", {})
+                    sp_agree_num = sp_agree.get("agree_num", 0) if isinstance(sp_agree, dict) else 0
+
+                    sub_comments.append(TiebaComment(
+                        comment_id=sp_id,
+                        content=sp_text,
+                        user_nickname=sp_nickname,
+                        user_avatar=sp_avatar,
+                        publish_time=sp_time_str,
+                        ip_location=sp_ip,
+                        like_count=sp_agree_num,
+                        note_id=note_detail.note_id,
+                        note_url=note_detail.note_url,
+                        tieba_id=str(note_detail.tieba_link.split("kw=")[-1]) if "kw=" in note_detail.tieba_link else "",
+                        tieba_name=note_detail.tieba_name,
+                        tieba_link=note_detail.tieba_link,
+                    ))
+
+            comments.append(TiebaComment(
+                comment_id=pid,
+                content=text,
+                user_nickname=user_nickname,
+                user_avatar=user_avatar,
+                publish_time=publish_time,
+                ip_location=ip_location,
+                sub_comment_count=sub_post_number,
+                sub_comment_list=sub_comments,
+                like_count=agree_num,
+                note_id=note_detail.note_id,
+                note_url=note_detail.note_url,
+                tieba_id=str(note_detail.tieba_link.split("kw=")[-1]) if "kw=" in note_detail.tieba_link else "",
+                tieba_name=note_detail.tieba_name,
+                tieba_link=note_detail.tieba_link,
+            ))
+
+        return comments
+
+    @staticmethod
+    def _extract_text(content_items: list) -> str:
+        """Extract plain text from content item list."""
+        parts = []
+        for item in content_items:
+            if isinstance(item, dict) and item.get("type") == 0:
+                parts.append(item.get("text", ""))
+        return "\n".join(parts) if parts else ""
+
+    @staticmethod
+    def _get_author_name(author_info: Optional[dict]) -> str:
+        """Extract display name from author info dict."""
+        if not author_info:
+            return ""
+        return author_info.get("name_show") or author_info.get("name", "")
+
+    # ------------------------------------------------------------------
+    #  Legacy methods kept for interface compatibility (creator mode, etc.)
+    # ------------------------------------------------------------------
+
+    async def pong(self, browser_context=None) -> bool:
+        """API mode does not require login, always returns True."""
+        return True
+
+    async def request(self, method, url, **kwargs):
+        """Generic HTTP request method (required by AbstractApiClient)."""
+        async with httpx.AsyncClient(timeout=self.timeout, proxy=self.default_ip_proxy) as client:
+            resp = await client.request(method, url, headers=self.headers, **kwargs)
+        if resp.status_code != 200:
+            raise Exception(f"Request failed: {method} {url} -> {resp.status_code}")
+        return resp.json()
+
+    async def update_cookies(self, browser_context=None):
+        """No-op in API mode."""
+        pass
 
     async def get_comments_all_sub_comments(
         self,
         comments: List[TiebaComment],
         crawl_interval: float = 1.0,
-        callback: Optional[Callable] = None,
-    ) -> List[TiebaComment]:
+        callback=None,
+        max_count: int = None,
+    ) -> Dict[str, List[TiebaComment]]:
         """
-        Get all sub-comments for specified comments (uses Playwright to access page, avoiding API detection)
-        Args:
-            comments: Comment list
-            crawl_interval: Crawl delay interval in seconds
-            callback: Callback function after one post crawl completes
-
-        Returns:
-            List[TiebaComment]: Sub-comment list
+        Sub-comments are already embedded via with_floor=1.
+        No additional fetching needed.
         """
-        if not config.ENABLE_GET_SUB_COMMENTS:
-            return []
-
-        if not self.playwright_page:
-            utils.logger.error("[BaiduTieBaClient.get_comments_all_sub_comments] playwright_page is None, cannot use browser mode")
-            raise Exception("playwright_page is required for browser-based sub-comment fetching")
-
-        all_sub_comments: List[TiebaComment] = []
-
-        for parment_comment in comments:
-            if parment_comment.sub_comment_count == 0:
-                continue
-
-            current_page = 1
-            max_sub_page_num = parment_comment.sub_comment_count // 10 + 1
-
-            while max_sub_page_num >= current_page:
-                # Construct sub-comment URL
-                sub_comment_url = (
-                    f"{self._host}/p/comment?"
-                    f"tid={parment_comment.note_id}&"
-                    f"pid={parment_comment.comment_id}&"
-                    f"fid={parment_comment.tieba_id}&"
-                    f"pn={current_page}"
-                )
-                utils.logger.info(f"[BaiduTieBaClient.get_comments_all_sub_comments] Accessing sub-comment page: {sub_comment_url}")
-
-                try:
-                    # Use Playwright to access sub-comment page
-                    await self.playwright_page.goto(sub_comment_url, wait_until="domcontentloaded")
-
-                    # Wait for page loading, using delay setting from config file
-                    await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-
-                    # Get page HTML content
-                    page_content = await self.playwright_page.content()
-
-                    # Extract sub-comments
-                    sub_comments = self._page_extractor.extract_tieba_note_sub_comments(
-                        page_content, parent_comment=parment_comment
-                    )
-
-                    if not sub_comments:
-                        utils.logger.info(
-                            f"[BaiduTieBaClient.get_comments_all_sub_comments] "
-                            f"Comment {parment_comment.comment_id} page {current_page} has no sub-comments, stopping crawl"
-                        )
-                        break
-
-                    if callback:
-                        await callback(parment_comment.note_id, sub_comments)
-
-                    all_sub_comments.extend(sub_comments)
-                    await asyncio.sleep(crawl_interval)
-                    current_page += 1
-
-                except Exception as e:
-                    utils.logger.error(
-                        f"[BaiduTieBaClient.get_comments_all_sub_comments] "
-                        f"Failed to get comment {parment_comment.comment_id} page {current_page} sub-comments: {e}"
-                    )
-                    break
-
-        utils.logger.info(f"[BaiduTieBaClient.get_comments_all_sub_comments] Total retrieved {len(all_sub_comments)} sub-comments")
-        return all_sub_comments
+        return {}
 
     async def get_notes_by_tieba_name(self, tieba_name: str, page_num: int) -> List[TiebaNote]:
-        """
-        Get post list by Tieba name (uses Playwright to access page, avoiding API detection)
-        Args:
-            tieba_name: Tieba name
-            page_num: Page number
-
-        Returns:
-            List[TiebaNote]: Post list
-        """
-        if not self.playwright_page:
-            utils.logger.error("[BaiduTieBaClient.get_notes_by_tieba_name] playwright_page is None, cannot use browser mode")
-            raise Exception("playwright_page is required for browser-based tieba note fetching")
-
-        # Construct Tieba post list URL
-        tieba_url = f"{self._host}/f?kw={quote(tieba_name)}&pn={page_num}"
-        utils.logger.info(f"[BaiduTieBaClient.get_notes_by_tieba_name] Accessing Tieba page: {tieba_url}")
-
-        try:
-            # Use Playwright to access Tieba page
-            await self.playwright_page.goto(tieba_url, wait_until="domcontentloaded")
-
-            # Wait for page loading, using delay setting from config file
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-
-            # Get page HTML content
-            page_content = await self.playwright_page.content()
-            utils.logger.info(f"[BaiduTieBaClient.get_notes_by_tieba_name] Successfully retrieved Tieba page HTML, length: {len(page_content)}")
-
-            # Extract post list
-            notes = self._page_extractor.extract_tieba_note_list(page_content)
-            utils.logger.info(f"[BaiduTieBaClient.get_notes_by_tieba_name] Extracted {len(notes)} posts")
-            return notes
-
-        except Exception as e:
-            utils.logger.error(f"[BaiduTieBaClient.get_notes_by_tieba_name] Failed to get Tieba post list: {e}")
-            raise
+        """Not yet implemented for API mode."""
+        raise NotImplementedError("get_notes_by_tieba_name not yet implemented for API mode")
 
     async def get_creator_info_by_url(self, creator_url: str) -> str:
-        """
-        Get creator information by creator URL (uses Playwright to access page, avoiding API detection)
-        Args:
-            creator_url: Creator homepage URL
-
-        Returns:
-            str: Page HTML content
-        """
-        if not self.playwright_page:
-            utils.logger.error("[BaiduTieBaClient.get_creator_info_by_url] playwright_page is None, cannot use browser mode")
-            raise Exception("playwright_page is required for browser-based creator info fetching")
-
-        utils.logger.info(f"[BaiduTieBaClient.get_creator_info_by_url] Accessing creator homepage: {creator_url}")
-
-        try:
-            # Use Playwright to access creator homepage
-            await self.playwright_page.goto(creator_url, wait_until="domcontentloaded")
-
-            # Wait for page loading, using delay setting from config file
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-
-            # Get page HTML content
-            page_content = await self.playwright_page.content()
-            utils.logger.info(f"[BaiduTieBaClient.get_creator_info_by_url] Successfully retrieved creator homepage HTML, length: {len(page_content)}")
-
-            return page_content
-
-        except Exception as e:
-            utils.logger.error(f"[BaiduTieBaClient.get_creator_info_by_url] Failed to get creator homepage: {e}")
-            raise
+        """Not yet implemented for API mode."""
+        raise NotImplementedError("get_creator_info_by_url not yet implemented for API mode")
 
     async def get_notes_by_creator(self, user_name: str, page_number: int) -> Dict:
-        """
-        Get creator's posts by creator (uses Playwright to access page, avoiding API detection)
-        Args:
-            user_name: Creator username
-            page_number: Page number
+        """Not yet implemented for API mode."""
+        raise NotImplementedError("get_notes_by_creator not yet implemented for API mode")
 
-        Returns:
-            Dict: Dictionary containing post data
-        """
-        if not self.playwright_page:
-            utils.logger.error("[BaiduTieBaClient.get_notes_by_creator] playwright_page is None, cannot use browser mode")
-            raise Exception("playwright_page is required for browser-based creator notes fetching")
-
-        # Construct creator post list URL
-        creator_url = f"{self._host}/home/get/getthread?un={quote(user_name)}&pn={page_number}&id=utf-8&_={utils.get_current_timestamp()}"
-        utils.logger.info(f"[BaiduTieBaClient.get_notes_by_creator] Accessing creator post list: {creator_url}")
-
-        try:
-            # Use Playwright to access creator post list page
-            await self.playwright_page.goto(creator_url, wait_until="domcontentloaded")
-
-            # Wait for page loading, using delay setting from config file
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-
-            # Get page content (this API returns JSON)
-            page_content = await self.playwright_page.content()
-
-            # Extract JSON data (page will contain <pre> tag or is directly JSON)
-            try:
-                # Try to extract JSON from page
-                json_text = await self.playwright_page.evaluate("() => document.body.innerText")
-                result = json.loads(json_text)
-                utils.logger.info(f"[BaiduTieBaClient.get_notes_by_creator] Successfully retrieved creator post data")
-                return result
-            except json.JSONDecodeError as e:
-                utils.logger.error(f"[BaiduTieBaClient.get_notes_by_creator] JSON parsing failed: {e}")
-                utils.logger.error(f"[BaiduTieBaClient.get_notes_by_creator] Page content: {page_content[:500]}")
-                raise Exception(f"Failed to parse JSON from creator notes page: {e}")
-
-        except Exception as e:
-            utils.logger.error(f"[BaiduTieBaClient.get_notes_by_creator] Failed to get creator post list: {e}")
-            raise
-
-    async def get_all_notes_by_creator_user_name(
-        self,
-        user_name: str,
-        crawl_interval: float = 1.0,
-        callback: Optional[Callable] = None,
-        max_note_count: int = 0,
-        creator_page_html_content: str = None,
-    ) -> List[TiebaNote]:
-        """
-        Get all creator posts by creator username
-        Args:
-            user_name: Creator username
-            crawl_interval: Crawl delay interval in seconds
-            callback: Callback function after one post crawl completes, an awaitable function
-            max_note_count: Maximum number of posts to retrieve, if 0 then get all
-            creator_page_html_content: Creator homepage HTML content
-
-        Returns:
-
-        """
-        # Baidu Tieba is special, the first 10 posts are directly displayed on the homepage and need special handling, cannot be obtained through API
-        result: List[TiebaNote] = []
-        if creator_page_html_content:
-            thread_id_list = (self._page_extractor.extract_tieba_thread_id_list_from_creator_page(creator_page_html_content))
-            utils.logger.info(f"[BaiduTieBaClient.get_all_notes_by_creator] got user_name:{user_name} thread_id_list len : {len(thread_id_list)}")
-            note_detail_task = [self.get_note_by_id(thread_id) for thread_id in thread_id_list]
-            notes = await asyncio.gather(*note_detail_task)
-            if callback:
-                await callback(notes)
-            result.extend(notes)
-
-        notes_has_more = 1
-        page_number = 1
-        page_per_count = 20
-        total_get_count = 0
-        while notes_has_more == 1 and (max_note_count == 0 or total_get_count < max_note_count):
-            notes_res = await self.get_notes_by_creator(user_name, page_number)
-            if not notes_res or notes_res.get("no") != 0:
-                utils.logger.error(f"[WeiboClient.get_notes_by_creator] got user_name:{user_name} notes failed, notes_res: {notes_res}")
-                break
-            notes_data = notes_res.get("data")
-            notes_has_more = notes_data.get("has_more")
-            notes = notes_data["thread_list"]
-            utils.logger.info(f"[WeiboClient.get_all_notes_by_creator] got user_name:{user_name} notes len : {len(notes)}")
-
-            note_detail_task = [self.get_note_by_id(note['thread_id']) for note in notes]
-            notes = await asyncio.gather(*note_detail_task)
-            if callback:
-                await callback(notes)
-            await asyncio.sleep(crawl_interval)
-            result.extend(notes)
-            page_number += 1
-            total_get_count += page_per_count
-        return result
+    async def get_all_notes_by_creator_user_name(self, *args, **kwargs):
+        """Not yet implemented for API mode."""
+        raise NotImplementedError("get_all_notes_by_creator_user_name not yet implemented for API mode")

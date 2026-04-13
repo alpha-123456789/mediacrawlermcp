@@ -538,20 +538,28 @@ class ToutiaoCrawler(AbstractCrawler):
 
         utils.logger.info(f"[ToutiaoCrawler.batch_get_article_comments] 获取评论, 文章数: {len(article_id_list)}")
 
+        # 构建 article_id -> comment_count 映射
+        comment_count_map = {}
+        for note in self.results["notes"]:
+            aid = note.get("article_id")
+            if aid:
+                comment_count_map[aid] = note.get("comment_count", 0)
+
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
 
         for article_id in article_id_list:
-            task = asyncio.create_task(self.get_comments(article_id, semaphore), name=article_id)
+            cc = comment_count_map.get(article_id, 0)
+            task = asyncio.create_task(self.get_comments(article_id, semaphore, cc), name=article_id)
             task_list.append(task)
 
         await asyncio.gather(*task_list)
 
-    async def get_comments(self, article_id: str, semaphore: asyncio.Semaphore):
+    async def get_comments(self, article_id: str, semaphore: asyncio.Semaphore, comment_count: int = 0):
         """获取文章评论"""
         async with semaphore:
             try:
-                utils.logger.info(f"[ToutiaoCrawler.get_comments] 开始获取评论: {article_id}")
+                utils.logger.info(f"[ToutiaoCrawler.get_comments] 开始获取评论: {article_id}, 预期评论数: {comment_count}")
 
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
 
@@ -564,6 +572,7 @@ class ToutiaoCrawler(AbstractCrawler):
                         sub_comments_callback=toutiao_store.batch_update_toutiao_subcomments,
                         max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
                         max_sub_comments_count=config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES,
+                        comment_count=comment_count,
                     ),
                     timeout=60
                 )

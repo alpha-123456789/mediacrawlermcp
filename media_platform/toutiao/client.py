@@ -553,16 +553,18 @@ class ToutiaoClient(AbstractApiClient, ProxyRefreshMixin):
         self,
         comment_id: str,
         max_count: int = 100,
+        reply_count: int = 0,
     ) -> List[Dict]:
         """
-        获取评论的所有子评论（只获取一遍）
+        获取评论的所有子评论（含重试机制，已知有回复但API返回空数据时重试）
         :param comment_id: 评论ID
         :param max_count: 最大子评论数
+        :param reply_count: 该评论已知的回复数（大于0且API返回空时触发重试）
         :return: 子评论列表
         """
         result = []
         offset = 0
-        max_retries = 2
+        max_retries = 3  # 增加到3次重试
 
         attempt = 0
         success = False
@@ -589,10 +591,21 @@ class ToutiaoClient(AbstractApiClient, ProxyRefreshMixin):
                 else:
                     reply_list = []
 
-                # 如果返回空数据，直接结束
+                # API返回空数据时，仅当已知有回复（reply_count>0）才重试
                 if not reply_list:
-                    utils.logger.info(f"[ToutiaoClient.get_comment_all_replies] 返回空数据, comment_id: {comment_id}")
-                    return []
+                    if reply_count > 0:
+                        attempt += 1
+                        if attempt < max_retries:
+                            delay = 2 * attempt + random.uniform(1, 2)
+                            utils.logger.warning(f"[ToutiaoClient.get_comment_all_replies] API返回空数据但预期有{reply_count}条回复，重试 {attempt}/{max_retries}, comment_id: {comment_id}, 等待{delay:.2f}s...")
+                            await asyncio.sleep(delay)
+                            continue
+                        else:
+                            utils.logger.warning(f"[ToutiaoClient.get_comment_all_replies] 多次重试仍返回空数据, comment_id: {comment_id}, 预期回复数: {reply_count}")
+                            return []
+                    else:
+                        utils.logger.info(f"[ToutiaoClient.get_comment_all_replies] API返回空数据, comment_id: {comment_id} (该评论无回复，不重试)")
+                        return []
 
                 # 格式化子评论数据
                 # 注意：子评论接口没有返回回复目标用户ID，使用空字符串
@@ -638,6 +651,7 @@ class ToutiaoClient(AbstractApiClient, ProxyRefreshMixin):
         sub_comments_callback: Optional[Callable] = None,
         max_count: int = 100,
         max_sub_comments_count: int = 50,
+        comment_count: int = 0,
     ) -> List[Dict]:
         """
         获取文章所有评论（只获取一遍）
@@ -647,11 +661,12 @@ class ToutiaoClient(AbstractApiClient, ProxyRefreshMixin):
         :param sub_comments_callback: 子评论回调函数
         :param max_count: 最大主评论数
         :param max_sub_comments_count: 每条主评论下最多获取的子评论数量
+        :param comment_count: 文章已知的评论数（大于0且API返回空时触发重试）
         :return: 评论列表
         """
         result = []
         offset = 0
-        max_retries = 2
+        max_retries = 3  # 增加到3次重试，头条评论接口不稳定
 
         utils.logger.info(f"[ToutiaoClient.get_article_all_comments] 开始获取评论, article_id: {article_id}, 是否获取子评论: {is_fetch_sub_comments}")
 
@@ -680,10 +695,25 @@ class ToutiaoClient(AbstractApiClient, ProxyRefreshMixin):
                 else:
                     comment_list = []
 
-                # 如果返回空数据，直接结束
+                # API返回空数据时，仅当已知有评论（comment_count>0）才重试
                 if not comment_list:
-                    utils.logger.info(f"[ToutiaoClient.get_article_all_comments] 返回空数据, article_id: {article_id}")
-                    return []
+                    if comment_count > 0:
+                        attempt += 1
+                        if attempt < max_retries:
+                            delay = 2 * attempt + random.uniform(1, 2)
+                            api_status = comments_res.get("status_code", "") if isinstance(comments_res, dict) else ""
+                            utils.logger.warning(
+                                f"[ToutiaoClient.get_article_all_comments] API返回空数据但预期有{comment_count}条评论，重试 {attempt}/{max_retries}, "
+                                f"article_id: {article_id}, status_code: {api_status}, 等待{delay:.2f}s..."
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        else:
+                            utils.logger.warning(f"[ToutiaoClient.get_article_all_comments] 多次重试仍返回空数据, article_id: {article_id}, 预期评论数: {comment_count}")
+                            return []
+                    else:
+                        utils.logger.info(f"[ToutiaoClient.get_article_all_comments] API返回空数据, article_id: {article_id} (该文章无评论，不重试)")
+                        return []
 
                 # 格式化评论数据
                 formatted_comments = self._format_comments(comment_list)
@@ -821,6 +851,7 @@ class ToutiaoClient(AbstractApiClient, ProxyRefreshMixin):
                     sub_comments = await self.get_comment_all_replies(
                         comment_id=comment_id,
                         max_count=max_sub_comments,
+                        reply_count=comment.get("reply_count", 0),
                     )
                     if sub_comments_callback and sub_comments:
                         await sub_comments_callback(article_id, comment_id, sub_comments)

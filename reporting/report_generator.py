@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 
 # 默认报告目录（如果调用者未指定）
-PROJECT_ROOT = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPORTS_DIR = PROJECT_ROOT / "reports"
 
 
@@ -82,7 +82,7 @@ class DataAnalyzer:
 
     def __init__(self, data: List[Dict]):
         self.data = data
-        from auto_field_detector import AutoFieldDetector
+        from reporting.auto_field_detector import AutoFieldDetector
         self.detector = AutoFieldDetector()
         self.field_map = self.detector.detect_from_data_list(data)
 
@@ -128,7 +128,7 @@ class DataAnalyzer:
 
     def _get_standardized_value(self, item: Dict, standard_field: str) -> int:
         """使用自动识别的字段映射获取值"""
-        from auto_field_detector import get_standardized_value
+        from reporting.auto_field_detector import get_standardized_value
         return get_standardized_value(item, self.field_map, standard_field)
 
     def get_data_profile(self) -> Dict:
@@ -240,7 +240,7 @@ class SmartReportGenerator:
 
     def _get_standardized_value(self, item: Dict, standard_field: str) -> int:
         """使用字段映射获取标准化值"""
-        from auto_field_detector import get_standardized_value
+        from reporting.auto_field_detector import get_standardized_value
         return get_standardized_value(item, self.analyzer.field_map, standard_field)
 
     def _auto_select_report_type(self, requested_type: str) -> str:
@@ -2009,7 +2009,7 @@ class MultiPlatformReportGenerator:
 
     def _get_standardized_value(self, item: Dict, standard_field: str) -> int:
         """使用字段映射获取标准化值"""
-        from auto_field_detector import get_standardized_value
+        from reporting.auto_field_detector import get_standardized_value
         return get_standardized_value(item, self.analyzer.field_map, standard_field)
 
     def _merge_platform_data(self):

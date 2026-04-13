@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 import jieba
 import jieba.analyse
 
-from auto_field_detector import AutoFieldDetector, get_standardized_value
+from reporting.auto_field_detector import AutoFieldDetector, get_standardized_value
 
 
 class SentimentAnalyzer:

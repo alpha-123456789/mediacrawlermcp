@@ -397,11 +397,13 @@ result = await crawl_media(
 ```
 .
 ├── mcp_server.py             # MCP 服务入口（4个工具）
-├── mcp_adapter.py            # 爬虫适配器
-├── report_generator.py       # 脚本报告生成器（11种报告类型）
-├── ai_report_generator.py    # AI 报告数据准备和提示词构建
-├── llm_report_generator.py   # LLM API 调用和 HTML 报告生成
-├── auto_field_detector.py    # 自动字段映射（消除硬编码依赖）
+├── mcp_core/                 # MCP 层
+│   └── mcp_adapter.py        # 爬虫适配器，桥接 MCP 和底层爬虫
+├── reporting/                # 报告生成层
+│   ├── report_generator.py   # 脚本报告生成器（11种报告类型）
+│   ├── ai_report_generator.py # AI 报告数据准备和提示词构建
+│   ├── llm_report_generator.py # LLM API 调用和 HTML 报告生成
+│   └── auto_field_detector.py # 自动字段映射（消除硬编码依赖）
 ├── tools/cdp_browser.py      # CDP 浏览器管理器
 ├── media_platform/           # 各平台爬虫实现
 │   ├── xhs/                  # 小红书

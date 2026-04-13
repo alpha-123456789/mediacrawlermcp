@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from mcp.server.fastmcp import FastMCP
-from mcp_adapter import run_crawl_sync
+from mcp_core.mcp_adapter import run_crawl_sync
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent
@@ -873,8 +873,8 @@ async def crawl_media(
             # 根据配置选择生成方式
             if use_ai:
                 # AI 增强报告生成
-                from ai_report_generator import generate_ai_report_data
-                from llm_report_generator import generate_report_with_llm
+                from reporting.ai_report_generator import generate_ai_report_data
+                from reporting.llm_report_generator import generate_report_with_llm
 
                 # 1. 准备 AI 报告数据（传入 report_type 以生成对应类型的报告）
                 ai_data = generate_ai_report_data(platform, keywords, items, report_type)
@@ -932,7 +932,7 @@ async def crawl_media(
                 )
             else:
                 # 脚本自动生成报告（标准模式）
-                from report_generator import generate_report
+                from reporting.report_generator import generate_report
 
                 report_path, summary, html_content = generate_report(
                     platform=platform,
@@ -1312,8 +1312,8 @@ async def crawl_multi_platform(
         try:
             if use_ai:
                 # AI 增强报告生成 - 多平台合并
-                from ai_report_generator import generate_multi_platform_report_data
-                from llm_report_generator import generate_multi_platform_report_with_llm
+                from reporting.ai_report_generator import generate_multi_platform_report_data
+                from reporting.llm_report_generator import generate_multi_platform_report_with_llm
 
                 # 1. 准备 AI 报告数据（多平台）
                 ai_data = generate_multi_platform_report_data(
@@ -1356,7 +1356,7 @@ async def crawl_multi_platform(
                 )
             else:
                 # 脚本自动生成报告（多平台合并）
-                from report_generator import generate_multi_platform_report
+                from reporting.report_generator import generate_multi_platform_report
 
                 report_path, summary, html_content = generate_multi_platform_report(
                     platform_data=all_platform_data,

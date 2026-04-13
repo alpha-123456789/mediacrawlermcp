@@ -225,9 +225,9 @@ print(result["report_path"])
 ### 文件架构
 
 ```
-ai_report_generator.py   → 准备数据 + 构建提示词
-llm_report_generator.py  → 调用 LLM API + 生成 HTML 报告
-auto_field_detector.py   → 自动字段映射（无需硬编码平台字段）
+reporting/ai_report_generator.py   → 准备数据 + 构建提示词
+reporting/llm_report_generator.py  → 调用 LLM API + 生成 HTML 报告
+reporting/auto_field_detector.py   → 自动字段映射（无需硬编码平台字段）
 ```
 
 ### AI 报告特性
@@ -289,11 +289,11 @@ uv run pytest
 ## 文件说明
 
 - `mcp_server.py` — MCP 服务器主文件，提供 4 个工具（crawl_media, crawl_multi_platform, get_platforms, get_crawler_types）
-- `mcp_adapter.py` — 爬虫适配器，桥接 MCP 和底层爬虫
-- `report_generator.py` — 脚本报告生成器（含情感分析），支持 11 种报告类型
-- `ai_report_generator.py` — AI 报告数据准备和提示词构建
-- `llm_report_generator.py` — LLM API 调用和 HTML 报告生成
-- `auto_field_detector.py` — 自动字段映射，消除硬编码平台字段依赖
+- `mcp_core/mcp_adapter.py` — 爬虫适配器，桥接 MCP 和底层爬虫
+- `reporting/report_generator.py` — 脚本报告生成器（含情感分析），支持 11 种报告类型
+- `reporting/ai_report_generator.py` — AI 报告数据准备和提示词构建
+- `reporting/llm_report_generator.py` — LLM API 调用和 HTML 报告生成
+- `reporting/auto_field_detector.py` — 自动字段映射，消除硬编码平台字段依赖
 - `tools/cdp_browser.py` — CDP 浏览器管理器
 
 ## 技能文件

@@ -1,0 +1,8 @@
+#!/bin/sh
+# Git post-merge hook: 拉取代码后自动检测 uv.lock 变更并同步依赖
+
+changed=$(git diff-tree -r --name-only ORIG_HEAD HEAD | grep "uv.lock")
+if [ -n "$changed" ]; then
+  echo "📦 uv.lock 已更新，正在同步依赖..."
+  uv sync
+fi

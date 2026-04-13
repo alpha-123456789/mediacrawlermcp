@@ -40,9 +40,25 @@ uv sync
 
 # 安装浏览器驱动（会自动下载所需 Node.js 运行时）
 uv run playwright install chromium
+
+# 安装 Git hooks（拉取代码后自动同步依赖，只需执行一次）
+bash setup-hooks.sh
 ```
 
 > **注意**：如果你需要本地开发/构建文档站点，则需要额外安装 Node.js >= 16.0.0
+
+### 3. 团队协作：自动同步依赖
+
+项目提供了 Git post-merge hook，当 `uv.lock` 变更时自动执行 `uv sync`，无需手动同步。
+
+**首次设置（每人一次）：**
+```bash
+bash setup-hooks.sh
+```
+
+设置后，`git pull` 时如果 `uv.lock` 有变更会自动同步依赖，没有变更则无任何操作。
+
+> 不同镜像源（清华源、阿里源等）不影响 `uv.lock` 内容，团队可各自配置镜像，锁定版本一致即可。
 
 ## 🤖 MCP 配置
 

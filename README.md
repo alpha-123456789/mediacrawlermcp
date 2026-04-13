@@ -118,6 +118,24 @@ bash setup-hooks.sh
 }
 ```
 
+**可选环境变量（均为可选项，不配置则不启用 AI 报告模式）：**
+
+| 变量 | 说明 |
+|------|------|
+| `ANTHROPIC_API_KEY` | Anthropic API Key（用于 AI 报告模式） |
+| `ANTHROPIC_BASE_URL` | Anthropic API 地址（可填兼容端点） |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL` | 指定模型名称（如 `claude-sonnet-4-6`） |
+
+**配置方式（三选一，优先级从高到低）：**
+
+1. **MCP `env` 字段** — 在上方 JSON 中添加 `"env": {"ANTHROPIC_API_KEY": "sk-xxx", ...}`
+2. **系统环境变量** — 在操作系统中设置
+3. **`.env` 文件** — 在项目根目录创建 `.env` 文件写入变量（会被前两种方式覆盖）
+
+> ⚠️ 如果在 MCP `env` 中写了空字符串（如 `"ANTHROPIC_API_KEY": ""`），会覆盖 `.env` 文件中的同名变量，导致 AI 模式失效。不需要的变量请直接不写，不要留空。
+>
+> AI 报告模式也可使用 OpenAI 兼容格式（`OPENAI_API_KEY` / `OPENAI_BASE_URL` / `LLM_MODEL`），详见[报告模式说明](#报告模式说明)。
+
 ## 🚀 使用方法
 
 配置完成后，在 AI 编辑器中直接使用自然语言或结构化参数爬取内容。

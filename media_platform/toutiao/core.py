@@ -661,6 +661,11 @@ class ToutiaoCrawler(AbstractCrawler):
     ) -> BrowserContext:
         """启动浏览器"""
         utils.logger.info("[ToutiaoCrawler.launch_browser] 创建浏览器上下文...")
+        chrome_channel = self._detect_chrome_channel()
+        if chrome_channel:
+            utils.logger.info("[ToutiaoCrawler] 使用系统 Chrome 浏览器")
+        else:
+            utils.logger.info("[ToutiaoCrawler] 未检测到 Chrome，使用 Playwright Chromium")
 
         if config.SAVE_LOGIN_STATE:
             user_data_dir = os.path.join(os.getcwd(), "browser_data", config.USER_DATA_DIR % config.PLATFORM)
@@ -672,11 +677,11 @@ class ToutiaoCrawler(AbstractCrawler):
                 viewport={"width": 1920, "height": 1080},
                 device_scale_factor=1,  # 禁用 Windows DPI 缩放
                 user_agent=user_agent,
-                channel="chrome",
+                channel=chrome_channel,
             )
             return browser_context
         else:
-            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel="chrome")
+            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel=chrome_channel)
             browser_context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080},
                 device_scale_factor=1,  # 禁用 Windows DPI 缩放

@@ -355,6 +355,11 @@ class KuaishouCrawler(AbstractCrawler):
         utils.logger.info(
             "[KuaishouCrawler.launch_browser] Begin create browser context ..."
         )
+        chrome_channel = self._detect_chrome_channel()
+        if chrome_channel:
+            utils.logger.info("[KuaishouCrawler] 使用系统 Chrome 浏览器")
+        else:
+            utils.logger.info("[KuaishouCrawler] 未检测到 Chrome，使用 Playwright Chromium")
         if config.SAVE_LOGIN_STATE:
             user_data_dir = os.path.join(
                 os.getcwd(), "browser_data", config.USER_DATA_DIR % config.PLATFORM
@@ -366,11 +371,11 @@ class KuaishouCrawler(AbstractCrawler):
                 proxy=playwright_proxy,  # type: ignore
                 viewport={"width": 1920, "height": 1080},
                 user_agent=user_agent,
-                channel="chrome",  # Use system's stable Chrome version
+                channel=chrome_channel,
             )
             return browser_context
         else:
-            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel="chrome")  # type: ignore
+            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel=chrome_channel)  # type: ignore
             browser_context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080}, user_agent=user_agent
             )

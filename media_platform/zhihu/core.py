@@ -437,6 +437,11 @@ class ZhihuCrawler(AbstractCrawler):
         utils.logger.info(
             "[ZhihuCrawler.launch_browser] Begin create browser context ..."
         )
+        chrome_channel = self._detect_chrome_channel()
+        if chrome_channel:
+            utils.logger.info("[ZhihuCrawler] 使用系统 Chrome 浏览器")
+        else:
+            utils.logger.info("[ZhihuCrawler] 未检测到 Chrome，使用 Playwright Chromium")
         if config.SAVE_LOGIN_STATE:
             # feat issue #14
             # we will save login state to avoid login every time
@@ -450,11 +455,11 @@ class ZhihuCrawler(AbstractCrawler):
                 proxy=playwright_proxy,  # type: ignore
                 viewport={"width": 1920, "height": 1080},
                 user_agent=user_agent,
-                channel="chrome",  # Use system Chrome stable version
+                channel=chrome_channel,
             )
             return browser_context
         else:
-            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel="chrome")  # type: ignore
+            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel=chrome_channel)  # type: ignore
             browser_context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080}, user_agent=user_agent
             )

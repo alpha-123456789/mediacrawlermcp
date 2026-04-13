@@ -337,6 +337,11 @@ class DouYinCrawler(AbstractCrawler):
         headless: bool = True,
     ) -> BrowserContext:
         """Launch browser and create browser context"""
+        chrome_channel = self._detect_chrome_channel()
+        if chrome_channel:
+            utils.logger.info("[DouYinCrawler] 使用系统 Chrome 浏览器")
+        else:
+            utils.logger.info("[DouYinCrawler] 未检测到 Chrome，使用 Playwright Chromium")
         if config.SAVE_LOGIN_STATE:
             user_data_dir = os.path.join(os.getcwd(), "browser_data", config.USER_DATA_DIR % config.PLATFORM)  # type: ignore
             browser_context = await chromium.launch_persistent_context(
@@ -349,10 +354,11 @@ class DouYinCrawler(AbstractCrawler):
                     "height": 1080
                 },
                 user_agent=user_agent,
+                channel=chrome_channel,
             )  # type: ignore
             return browser_context
         else:
-            browser = await chromium.launch(headless=headless, proxy=playwright_proxy)  # type: ignore
+            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel=chrome_channel)  # type: ignore
             browser_context = await browser.new_context(viewport={"width": 1920, "height": 1080}, user_agent=user_agent)
             return browser_context
 

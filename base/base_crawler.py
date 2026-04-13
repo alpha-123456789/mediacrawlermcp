@@ -17,6 +17,8 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
+import os
+import platform
 from abc import ABC, abstractmethod
 from typing import Dict, Optional
 
@@ -24,6 +26,35 @@ from playwright.async_api import BrowserContext, BrowserType, Playwright
 
 
 class AbstractCrawler(ABC):
+
+    @staticmethod
+    def _detect_chrome_channel() -> Optional[str]:
+        """
+        检测系统是否安装了 Chrome 浏览器。
+        有则返回 "chrome"（使用系统 Chrome，反检测更好），无则返回 None（Playwright 自动使用内置 Chromium）。
+        """
+        system = platform.system()
+        if system == "Windows":
+            possible_paths = [
+                os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"),
+                os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"),
+                os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+            ]
+        elif system == "Darwin":
+            possible_paths = [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            ]
+        else:
+            possible_paths = [
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/chromium",
+            ]
+        for path in possible_paths:
+            if os.path.isfile(path):
+                return "chrome"
+        return None
 
     @abstractmethod
     async def start(self):

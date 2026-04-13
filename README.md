@@ -124,7 +124,7 @@ bash setup-hooks.sh
 |------|------|
 | `ANTHROPIC_API_KEY` | Anthropic API Key（用于 AI 报告模式） |
 | `ANTHROPIC_BASE_URL` | Anthropic API 地址（可填兼容端点） |
-| `ANTHROPIC_DEFAULT_SONNET_MODEL` | 指定模型名称（如 `claude-sonnet-4-6`） |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL` | 可选，指定模型名称（如 `claude-sonnet-4-6`），通过 Claude Code 运行时自动注入，独立运行时可手动配置 |
 
 **配置方式（三选一，优先级从高到低）：**
 
@@ -286,35 +286,6 @@ result = await crawl_multi_platform(
 |--------|------|------|
 | `get_platforms` | 获取支持的平台列表 | 显示所有可爬取的平台代码、名称和描述 |
 | `get_crawler_types` | 获取支持的爬取类型 | 显示可用的爬取类型说明 |
-
-### 子评论（二级评论）说明
-
-设置 `is_get_sub_comments=true` 后，爬虫会为每条一级评论获取完整的子评论列表。`max_comments_count` 同时控制一级评论总数和每条一级评论下的子评论数量。
-
-**子评论合并机制：** 各平台爬虫获取子评论后，会自动合并到一级评论的对应字段中，确保返回数据包含完整子评论（而非仅 API 默认预览的 2-3 条）。
-
-| 平台 | 子评论存储字段 |
-|------|--------------|
-| B站 | `replies` |
-| 小红书 | `sub_comments` |
-| 抖音 | `reply_comment` |
-| 快手 | `subCommentsV2` |
-| 微博 | `comments`（嵌入一级评论中） |
-| 贴吧 | `sub_comment_list` |
-| 知乎 | `sub_comment_list` |
-| 今日头条 | `sub_comments` |
-
-**示例：获取 B 站视频的评论和子评论**
-```python
-result = await crawl_media(
-    platform="bili",
-    keywords="宝宝巴士",
-    max_count=20,
-    is_get_comments=True,
-    is_get_sub_comments=True,
-    max_comments_count=5  # 每条一级评论下最多获取 5 条子评论
-)
-```
 
 ### 报告模式说明
 

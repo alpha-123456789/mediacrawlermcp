@@ -1424,4 +1424,10 @@ async def crawl_multi_platform(
 # =========================
 
 if __name__ == "__main__":
-    mcp.run()
+    transport = os.getenv("MCP_TRANSPORT", "stdio")
+    if transport == "sse":
+        mcp.run(transport="sse", host=os.getenv("MCP_HOST", "0.0.0.0"), port=int(os.getenv("MCP_PORT", "8000")))
+    elif transport == "streamable-http":
+        mcp.run(transport="streamable-http", host=os.getenv("MCP_HOST", "0.0.0.0"), port=int(os.getenv("MCP_PORT", "8000")))
+    else:
+        mcp.run()

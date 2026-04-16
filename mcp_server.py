@@ -1434,6 +1434,13 @@ async def crawl_multi_platform(
 if __name__ == "__main__":
     transport = os.getenv("MCP_TRANSPORT", "stdio")
     if transport in ("sse", "streamable-http"):
+        import starlette.routing
+        import starlette.staticfiles
+        reports_dir = str(PROJECT_ROOT / "reports")
+        mcp._custom_starlette_routes.insert(0, starlette.routing.Mount(
+            "/reports",
+            app=starlette.staticfiles.StaticFiles(directory=reports_dir, html=True),
+        ))
         mcp.settings.port = int(os.getenv("MCP_PORT", "8000"))
         mcp.run(transport=transport)
     else:

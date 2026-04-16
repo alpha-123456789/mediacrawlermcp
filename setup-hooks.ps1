@@ -1,4 +1,4 @@
-# 安装 Git hooks 到本地仓库
+﻿# 安装 Git hooks 到本地仓库
 # 使用方法: .\setup-hooks.ps1
 
 $hooksDir = "hooks"

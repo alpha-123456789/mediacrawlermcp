@@ -96,7 +96,15 @@ class CrawlResult:
 # FastMCP 服务器实例
 # =========================
 
-mcp = FastMCP("mediacrawlermcp")
+_mcp_host = os.getenv("MCP_HOST", "127.0.0.1")
+_mcp_transport_security = None
+if _mcp_host not in ("127.0.0.1", "localhost", "::1"):
+    from mcp.server.fastmcp.server import TransportSecuritySettings
+    _mcp_transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+    )
+
+mcp = FastMCP("mediacrawlermcp", host=_mcp_host, transport_security=_mcp_transport_security)
 
 
 # =========================
@@ -1426,7 +1434,6 @@ async def crawl_multi_platform(
 if __name__ == "__main__":
     transport = os.getenv("MCP_TRANSPORT", "stdio")
     if transport in ("sse", "streamable-http"):
-        mcp.settings.host = os.getenv("MCP_HOST", "0.0.0.0")
         mcp.settings.port = int(os.getenv("MCP_PORT", "8000"))
         mcp.run(transport=transport)
     else:

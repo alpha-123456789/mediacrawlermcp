@@ -42,7 +42,10 @@ uv sync
 uv run playwright install chromium
 
 # 安装 Git hooks（拉取代码后自动同步依赖，只需执行一次）
+# macOS / Linux
 bash setup-hooks.sh
+# Windows PowerShell
+.\setup-hooks.ps1
 ```
 
 > **注意**：如果你需要本地开发/构建文档站点，则需要额外安装 Node.js >= 16.0.0
@@ -53,7 +56,11 @@ bash setup-hooks.sh
 
 **首次设置（每人一次）：**
 ```bash
+# macOS / Linux
 bash setup-hooks.sh
+
+# Windows PowerShell
+.\setup-hooks.ps1
 ```
 
 设置后，`git pull` 时如果 `uv.lock` 有变更会自动同步依赖，没有变更则无任何操作。

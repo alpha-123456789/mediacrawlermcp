@@ -198,7 +198,7 @@ result = await crawl_media(
 
 ```
 搜索小红书上关于"Python编程"的热门帖子
-爬取B站关于"宝宝巴士"的视频和评论，做舆情分析
+爬取B站关于"人工智能"的视频和评论，做舆情分析
 分析抖音"美食探店"的传播趋势
 微博上"新能源汽车"的风险预警报告
 ```
@@ -210,7 +210,7 @@ result = await crawl_media(
   "platform": "bili",
   "platform_name": "B站",
   "report_mode": "ai_enhanced",
-  "keywords": "宝宝巴士",
+  "keywords": "人工智能",
   "report_path": "/path/to/reports/舆情分析报告_xxx.html",
   "relative_path": "reports/舆情分析报告_xxx.html",
   "summary": "舆情分析摘要...",
@@ -231,7 +231,7 @@ result = await crawl_media(
 result = await crawl_multi_platform(
     platforms=["bili", "dy", "xhs"],
     crawler_type="search",
-    keywords="宝宝巴士",
+    keywords="人工智能",
     max_count=20,
     is_get_comments=True,
     max_comments_count=10
@@ -268,11 +268,11 @@ result = await crawl_multi_platform(
   "platforms": ["bili", "dy", "xhs"],
   "platform_names": ["B站", "抖音", "小红书"],
   "report_mode": "ai_enhanced",
-  "keywords": "宝宝巴士",
+  "keywords": "人工智能",
   "total_items": 60,
   "platform_breakdown": {"xhs": 20, "dy": 20, "bili": 20},
-  "report_path": "/path/to/reports/多平台_宝宝巴士_舆情分析报告_xxx.html",
-  "relative_path": "reports/多平台_宝宝巴士_舆情分析报告_xxx.html",
+  "report_path": "/path/to/reports/多平台_人工智能_舆情分析报告_xxx.html",
+  "relative_path": "reports/多平台_人工智能_舆情分析报告_xxx.html",
   "summary": "多平台综合分析摘要...",
   "verification_samples": {},
   "message": "多平台舆情分析报告已生成"
@@ -383,7 +383,7 @@ result = await crawl_media(
 ```python
 result = await crawl_media(
     platform="bili",
-    keywords="宝宝巴士",
+    keywords="人工智能",
     report_mode="script"
 )
 ```

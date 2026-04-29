@@ -41,7 +41,7 @@
 crawl_media(
     platform="xhs",          # 平台: xhs/dy/ks/bili/wb/tieba/zhihu/toutiao
     crawler_type="search",   # 类型: search/detail/creator
-    keywords="宝宝巴士",     # 搜索关键词
+    keywords="人工智能",     # 搜索关键词
     max_count=20,            # 爬取数量 (1-100)
     is_get_comments=true,    # 是否获取评论
     is_get_sub_comments=false, # 是否获取子评论
@@ -59,7 +59,7 @@ crawl_media(
     "status": "success",
     "platform": "bili",
     "platform_name": "B站",
-    "keywords": "宝宝巴士",
+    "keywords": "人工智能",
     "report_mode": "ai",
     "report_path": "绝对路径/舆情分析报告_xxx.html",
     "relative_path": "reports/舆情分析报告_xxx.html",
@@ -90,7 +90,7 @@ crawl_media(
 crawl_multi_platform(
     platforms=["xhs", "dy", "bili"],  # 平台列表
     crawler_type="search",           # 类型: search/detail/creator
-    keywords="宝宝巴士",             # 搜索关键词
+    keywords="人工智能",             # 搜索关键词
     max_count=20,                    # 每个平台爬取数量
     is_get_comments=true,            # 是否获取评论
     is_get_sub_comments=false,       # 是否获取子评论
@@ -107,10 +107,10 @@ crawl_multi_platform(
     "status": "success",
     "platforms": ["xhs", "dy", "bili"],
     "platform_names": ["小红书", "抖音", "B站"],
-    "keywords": "宝宝巴士",
+    "keywords": "人工智能",
     "report_mode": "ai_enhanced",
-    "report_path": "绝对路径/多平台_宝宝巴士_舆情分析报告_xxx.html",
-    "relative_path": "reports/多平台_宝宝巴士_舆情分析报告_xxx.html",
+    "report_path": "绝对路径/多平台_人工智能_舆情分析报告_xxx.html",
+    "relative_path": "reports/多平台_人工智能_舆情分析报告_xxx.html",
     "summary": "多平台综合分析摘要...",
     "total_items": 60,
     "platform_breakdown": {
@@ -160,7 +160,7 @@ print(result["summary"])
 result = await crawl_media(
     platform="bili",
     crawler_type="search",
-    keywords="宝宝巴士广告",
+    keywords="人工智能广告",
     max_count=20,
     is_get_comments=True,
     max_comments_count=10
@@ -172,7 +172,7 @@ result = await crawl_media(
 result = await crawl_multi_platform(
     platforms=["bili", "dy", "xhs"],
     crawler_type="search",
-    keywords="宝宝巴士",
+    keywords="人工智能",
     max_count=20,
     is_get_comments=True,
     max_comments_count=10
@@ -193,7 +193,7 @@ result = await crawl_media(
 ```python
 result = await crawl_media(
     platform="bili",
-    keywords="宝宝巴士",
+    keywords="人工智能",
     report_mode="script"
 )
 print(result["report_path"])

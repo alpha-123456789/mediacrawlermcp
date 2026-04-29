@@ -148,7 +148,7 @@ chart.setOption({
   * 数据格式示例: [{"value": 60.5, "name": "正面"}, ...]
   * 必须用这些具体数值初始化 ECharts 的 option.series.data
 - 热词云必须使用用户提供的热词数据渲染
-  * 数据格式示例: [{"name": "宝宝巴士", "value": 185}, ...]
+  * 数据格式示例: [{"name": "人工智能", "value": 185}, ...]
   * name=词, value=权重，用于 ECharts wordCloud series
 - **严禁在图表位置显示"暂无数据"或留空**，必须使用真实数据渲染
 

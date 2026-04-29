@@ -1174,8 +1174,8 @@ async def crawl_multi_platform(
             "status": "success",
             "platforms": ["xhs", "dy", "bili"],
             "platform_names": ["小红书", "抖音", "B站"],
-            "keywords": "宝宝巴士",
-            "report_path": "reports/多平台_宝宝巴士_舆情分析报告_20250330_143000.html",
+            "keywords": "人工智能",
+            "report_path": "reports/多平台_人工智能_舆情分析报告_20250330_143000.html",
             "summary": "...",
             "message": "多平台舆情分析报告已生成"
         }

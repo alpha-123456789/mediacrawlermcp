@@ -108,6 +108,34 @@ mcp = FastMCP("mediacrawlermcp", host=_mcp_host, transport_security=_mcp_transpo
 
 
 # =========================
+# 工具函数
+# =========================
+
+def safe_int(value, default=0):
+    """安全转换为整数，支持字符串格式如 '1.2万', '1k', '1,000'"""
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return default
+        # 中文单位
+        if '万' in value:
+            return int(float(value.replace('万', '')) * 10000)
+        if 'k' in value.lower():
+            return int(float(value.lower().replace('k', '')) * 1000)
+        # 移除逗号
+        value = value.replace(',', '')
+        try:
+            return int(float(value))
+        except:
+            return default
+    return default
+
+
+# =========================
 # 平台数据处理器
 # =========================
 
@@ -115,13 +143,10 @@ def process_xhs_data(data: List[Dict]) -> List[Dict]:
     """
     处理小红书数据
 
-    数据结构特点:
-    - note_id: 帖子ID
-    - title: 标题
-    - author/user: 作者信息
-    - interact_info: 互动数据（点赞、收藏、评论数）
-    - desc: 正文描述
-    - comments: 评论列表，包含 sub_comments 子评论
+    输出字段标准化:
+    - interact_info: {likes, comments, views, shares, favorites}
+    - comments[].{content, like_count, create_time, comment_nickname, sub_comment_list[]}
+      sub_comment_list[].{content, like_count, create_time, sub_comment_nickname}
     """
     if not data:
         return []
@@ -132,7 +157,6 @@ def process_xhs_data(data: List[Dict]) -> List[Dict]:
         comments = post.get("comments") or []
 
         for comment in comments:
-            # 处理子评论
             sub_comment_list = []
             sub_comments = comment.get("sub_comments") or []
             for sub_comment in sub_comments:
@@ -145,24 +169,29 @@ def process_xhs_data(data: List[Dict]) -> List[Dict]:
 
             comment_list.append({
                 "content": comment.get("content", ""),
-                "sub_comment_count": comment.get("sub_comment_count", 0),
+                "create_time": comment.get("create_time", ""),
                 "like_count": comment.get("like_count", 0),
                 "comment_nickname": comment.get("user_info", {}).get("nickname", ""),
+                "sub_comment_count": comment.get("sub_comment_count", 0),
                 "sub_comment_list": sub_comment_list
             })
 
-        # 获取作者昵称（兼容不同字段路径）
         author_nickname = ""
         if post.get("author"):
             author_nickname = post["author"].get("nickname", "")
         elif post.get("user"):
             author_nickname = post["user"].get("nickname", "")
 
+        interact = post.get("interact_info", {})
         items.append({
             "note_id": post.get("note_id", ""),
             "title": post.get("title", ""),
             "nickname": author_nickname,
-            "interact_info": post.get("interact_info", {}),
+            "interact_info": {
+                "likes": safe_int(interact.get("likeCount")),
+                "comments": safe_int(interact.get("commentCount")),
+                "favorites": safe_int(interact.get("collectCount")),
+            },
             "desc": post.get("desc", ""),
             "comments": comment_list
         })
@@ -174,11 +203,10 @@ def process_bili_data(data: List[Dict]) -> List[Dict]:
     """
     处理B站数据
 
-    数据结构特点:
-    - View: 视频基本信息（aid, title, desc, owner等）
-    - Card: 卡片信息
-    - stat: 统计数据（点赞、投币、收藏、分享等）
-    - comments: 评论列表，包含 replies 子回复
+    输出字段标准化:
+    - interact_info: {likes, comments, views, shares, favorites, coins}
+    - comments[].{content, like_count, create_time, comment_nickname, sub_comment_list[]}
+      sub_comment_list[].{content, like_count, create_time, sub_comment_nickname}
     """
     if not data:
         return []
@@ -191,12 +219,10 @@ def process_bili_data(data: List[Dict]) -> List[Dict]:
         comments = post.get("comments") or []
 
         for comment in comments:
-            # 处理子评论（B站使用 replies）
             sub_comment_list = []
             replies = comment.get("replies") or []
             for sub_comment in replies:
                 raw_content = sub_comment.get("content", {})
-                # content 可能是字典或字符串
                 if isinstance(raw_content, dict):
                     content_str = raw_content.get("message", "")
                 elif isinstance(raw_content, str):
@@ -212,7 +238,6 @@ def process_bili_data(data: List[Dict]) -> List[Dict]:
                 })
 
             raw_content = comment.get("content", {})
-            # content 可能是字典或字符串
             if isinstance(raw_content, dict):
                 comment_content = raw_content.get("message", "")
             elif isinstance(raw_content, str):
@@ -222,21 +247,29 @@ def process_bili_data(data: List[Dict]) -> List[Dict]:
 
             comment_list.append({
                 "content": comment_content,
-                "sub_comment_count": comment.get("rcount", 0),
+                "create_time": comment.get("ctime", ""),
                 "like_count": comment.get("like", 0),
                 "comment_nickname": comment.get("member", {}).get("uname", ""),
+                "sub_comment_count": comment.get("rcount", 0),
                 "sub_comment_list": sub_comment_list
             })
 
-        # 获取作者名称（优先使用owner.name，其次使用Card中的name）
         owner_name = view.get("owner", {}).get("name", "") or name
+        stat = view.get("stat", {})
 
         items.append({
             "aid": view.get("aid", ""),
             "bvid": view.get("bvid", ""),
             "title": view.get("title", ""),
             "nickname": owner_name,
-            "interact_info": view.get("stat", {}),
+            "interact_info": {
+                "likes": safe_int(stat.get("like")),
+                "coins": safe_int(stat.get("coin")),
+                "favorites": safe_int(stat.get("favorite")),
+                "shares": safe_int(stat.get("share")),
+                "comments": safe_int(stat.get("reply")),
+                "views": safe_int(stat.get("view")),
+            },
             "desc": view.get("desc", ""),
             "comments": comment_list
         })
@@ -248,13 +281,10 @@ def process_dy_data(data: List[Dict]) -> List[Dict]:
     """
     处理抖音数据
 
-    数据结构特点:
-    - aweme_id: 视频ID
-    - create_time: 创建时间
-    - author: 作者信息
-    - statistics: 统计数据
-    - desc: 视频描述
-    - comments: 评论列表，包含 reply_comment 子评论
+    输出字段标准化:
+    - interact_info: {likes, comments, views, shares, favorites}
+    - comments[].{content, like_count, create_time, comment_nickname, sub_comment_list[]}
+      sub_comment_list[].{content, like_count, create_time, sub_comment_nickname}
     """
     if not data:
         return []
@@ -265,7 +295,6 @@ def process_dy_data(data: List[Dict]) -> List[Dict]:
         comments = post.get("comments") or []
 
         for comment in comments:
-            # 处理子评论（抖音使用 reply_comment）
             sub_comment_list = []
             sub_comments = comment.get("reply_comment") or []
             for sub_comment in sub_comments:
@@ -273,31 +302,31 @@ def process_dy_data(data: List[Dict]) -> List[Dict]:
                     "content": sub_comment.get("text", ""),
                     "create_time": sub_comment.get("create_time", ""),
                     "like_count": sub_comment.get("digg_count", 0),
-                    "sub_comment_nickname": sub_comment.get("user", {}).get("nickname", ""),
-                    "reply_comment": sub_comment.get("reply_comment", 0),
-                    "digg_count": sub_comment.get("digg_count", 0),
-                    "user_digged": sub_comment.get("user_digged", 0),
-                    "is_note_comment": sub_comment.get("is_note_comment", 0)
+                    "sub_comment_nickname": sub_comment.get("user", {}).get("nickname", "")
                 })
 
             comment_list.append({
                 "content": comment.get("text", ""),
                 "create_time": comment.get("create_time", ""),
-                "item_comment_total": comment.get("item_comment_total", 0),
-                "reply_comment_total": comment.get("reply_comment_total", 0),
                 "like_count": comment.get("digg_count", 0),
                 "comment_nickname": comment.get("user", {}).get("nickname", ""),
-                "digg_count": comment.get("digg_count", 0),
-                "user_digged": comment.get("user_digged", 0),
-                "is_note_comment": comment.get("is_note_comment", 0),
+                "sub_comment_count": comment.get("reply_comment_total", 0),
                 "sub_comment_list": sub_comment_list
             })
+
+        statistics = post.get("statistics", {})
 
         items.append({
             "create_time": post.get("create_time", ""),
             "aweme_id": post.get("aweme_id", ""),
             "nickname": post.get("author", {}).get("nickname", ""),
-            "interact_info": post.get("statistics", {}),
+            "interact_info": {
+                "likes": safe_int(statistics.get("digg_count")),
+                "comments": safe_int(statistics.get("comment_count")),
+                "shares": safe_int(statistics.get("share_count")),
+                "views": safe_int(statistics.get("play_count")),
+                "favorites": safe_int(statistics.get("collect_count")),
+            },
             "desc": post.get("desc", ""),
             "comments": comment_list
         })
@@ -322,10 +351,10 @@ def process_wb_data(data: List[Dict]) -> List[Dict]:
     """
     处理微博数据
 
-    数据结构特点:
-    - mblog: 微博正文数据
-    - comments: 评论列表
-    - user: 用户信息
+    输出字段标准化:
+    - interact_info: {likes, comments, views, shares}
+    - comments[].{content, like_count, create_time, comment_nickname, sub_comment_list[]}
+      sub_comment_list[].{content, like_count, sub_comment_nickname}
     """
     if not data:
         return []
@@ -337,7 +366,6 @@ def process_wb_data(data: List[Dict]) -> List[Dict]:
         comments = post.get("comments") or []
 
         for comment in comments:
-            # 处理子评论
             sub_comment_list = []
             sub_comments = comment.get("comments") or []
             for sub_comment in sub_comments:
@@ -348,27 +376,23 @@ def process_wb_data(data: List[Dict]) -> List[Dict]:
                 })
 
             comment_list.append({
-                "created_at": comment.get("created_at", ""),
                 "content": strip_html(comment.get("text", "")),
-                "sub_comment_count": len(sub_comment_list),
+                "create_time": comment.get("created_at", ""),
                 "like_count": comment.get("like_count", 0),
                 "comment_nickname": comment.get("user", {}).get("screen_name", ""),
+                "sub_comment_count": len(sub_comment_list),
                 "sub_comment_list": sub_comment_list
             })
-
-        # 构建互动信息
-        interact_info = {
-            "reposts_count": mblog.get("reposts_count", 0),
-            "comments_count": mblog.get("comments_count", 0),
-            "attitudes_count": mblog.get("attitudes_count", 0),
-            "fans": mblog.get("fans", 0)
-        }
 
         items.append({
             "created_at": mblog.get("created_at", ""),
             "note_id": mblog.get("id", ""),
             "nickname": mblog.get("user", {}).get("screen_name", ""),
-            "interact_info": interact_info,
+            "interact_info": {
+                "likes": safe_int(mblog.get("attitudes_count")),
+                "comments": safe_int(mblog.get("comments_count")),
+                "shares": safe_int(mblog.get("reposts_count")),
+            },
             "desc": strip_html(mblog.get("text", "")),
             "comments": comment_list
         })
@@ -413,13 +437,13 @@ def process_zhihu_data(data: List[Dict]) -> List[Dict]:
                 "content": comment.get("content", ""),
                 "sub_comment_count": comment.get("sub_comment_count", 0),
                 "like_count": comment.get("like_count", 0),
-                "user_nickname": comment.get("user_nickname", ""),
+                "comment_nickname": comment.get("user_nickname", ""),
                 "sub_comment_list": sub_comment_list
             })
 
         interact_info = {
-            "voteup_count": post.get("voteup_count", 0),
-            "comment_count": post.get("comment_count", 0)
+            "likes": safe_int(post.get("voteup_count")),
+            "comments": safe_int(post.get("comment_count")),
         }
 
         items.append({
@@ -479,11 +503,9 @@ def process_tieba_data(data: List[Dict]) -> List[Dict]:
             })
 
         interact_info = {
-            "total_replay_num": post.get("total_replay_num", 0),
-            "like_count": post.get("like_count", 0),
-            "collect_count": post.get("collect_count", 0),
-            "total_replay_page": post.get("total_replay_page", 0),
-            "ip_location": post.get("ip_location", "")
+            "likes": safe_int(post.get("like_count")),
+            "comments": safe_int(post.get("total_replay_num")),
+            "favorites": safe_int(post.get("collect_count")),
         }
 
         items.append({
@@ -502,17 +524,16 @@ def process_ks_data(data: List[Dict]) -> List[Dict]:
     """
     处理快手数据
 
-    数据结构特点:
-    - photo: 视频信息（可能是字典或列表）
-    - author: 作者信息
-    - comments: 评论列表
+    输出字段标准化:
+    - interact_info: {likes, comments, views}
+    - comments[].{content, like_count, comment_nickname, sub_comment_list[]}
+      sub_comment_list[].{content, like_count, sub_comment_nickname}
     """
     if not data:
         return []
 
     items = []
     for post in data:
-        # photo 可能是字典或列表，统一处理为字典
         photo = post.get("photo", {})
         if isinstance(photo, list):
             photo = photo[0] if photo else {}
@@ -521,7 +542,6 @@ def process_ks_data(data: List[Dict]) -> List[Dict]:
 
         comments = post.get("comments") or []
 
-        # 处理评论，提取子评论
         comment_list = []
         for comment in comments:
             sub_comment_list = []
@@ -529,30 +549,18 @@ def process_ks_data(data: List[Dict]) -> List[Dict]:
             for sub_comment in sub_comments:
                 sub_comment_list.append({
                     "content": sub_comment.get("content", ""),
-                    # V2 REST API: author_name (flat), GraphQL: author.name (nested)
                     "sub_comment_nickname": sub_comment.get("author_name") or sub_comment.get("authorName") or sub_comment.get("author", {}).get("name", ""),
                     "like_count": sub_comment.get("likeCount", 0)
                 })
 
             comment_list.append({
                 "content": comment.get("content", ""),
-                # V2 REST API: author_name (flat), GraphQL: author.name (nested)
                 "comment_nickname": comment.get("author_name") or comment.get("authorName") or comment.get("author", {}).get("name", ""),
                 "like_count": comment.get("likeCount", 0),
                 "sub_comment_count": len(sub_comment_list),
                 "sub_comment_list": sub_comment_list
             })
 
-        interact_info = {
-            "likeCount": photo.get("likeCount", 0),
-            "viewCount": photo.get("viewCount", 0),
-            "duration": photo.get("duration", 0),
-            # commentCountV2 来自 V2 评论 API，通过 core.py 注入到 post 层级
-            "commentCount": post.get("commentCountV2") or photo.get("commentCount") or 0,
-            "realLikeCount": photo.get("realLikeCount", 0)
-        }
-
-        # author 可能在 photo 下，也可能在 post 下
         author_name = ""
         if photo.get("author"):
             author_name = photo["author"].get("name", "")
@@ -564,7 +572,11 @@ def process_ks_data(data: List[Dict]) -> List[Dict]:
             "caption": photo.get("caption", ""),
             "originCaption": photo.get("originCaption", ""),
             "nickname": author_name,
-            "interact_info": interact_info,
+            "interact_info": {
+                "likes": safe_int(photo.get("likeCount")),
+                "comments": safe_int(post.get("commentCountV2") or photo.get("commentCount")),
+                "views": safe_int(photo.get("viewCount")),
+            },
             "comments": comment_list
         })
 
@@ -628,10 +640,10 @@ def process_toutiao_data(data: List[Dict]) -> List[Dict]:
 
         # 构建互动信息
         interact_info = {
-            "read_count": post.get("read_count", 0),
-            "like_count": post.get("like_count", 0),
-            "comment_count": post.get("comment_count", 0),
-            "share_count": post.get("share_count", 0)
+            "likes": safe_int(post.get("like_count")),
+            "comments": safe_int(post.get("comment_count")),
+            "views": safe_int(post.get("read_count")),
+            "shares": safe_int(post.get("share_count")),
         }
 
         items.append({
@@ -863,7 +875,7 @@ async def crawl_media(
             platform_name = PLATFORM_NAMES.get(platform, platform)
 
   # 检查是否配置了 AI API
-            ai_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")
+            ai_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("OPENAI_API_KEY")
             ai_base_url = os.getenv("ANTHROPIC_BASE_URL") or os.getenv("OPENAI_BASE_URL")
             has_ai_config = bool(ai_api_key and ai_base_url)
 
@@ -914,7 +926,7 @@ async def crawl_media(
                             sample["comment_preview"].append({
                                 "user": c.get('comment_nickname', c.get('user_nickname', '匿名')),
                                 "content": c.get('content', '')[:100] if c.get('content') else '',
-                                "likes": c.get('like_count', 0)
+                                "likes": safe_int(c.get('like_count'))
                             })
                     verification_samples.append(sample)
 
@@ -969,7 +981,7 @@ async def crawl_media(
                             sample["comment_preview"].append({
                                 "user": c.get('comment_nickname', c.get('user_nickname', '匿名')),
                                 "content": c.get('content', '')[:100] if c.get('content') else '',
-                                "likes": c.get('like_count', 0)
+                                "likes": safe_int(c.get('like_count'))
                             })
                     verification_samples.append(sample)
 
@@ -1302,7 +1314,7 @@ async def crawl_multi_platform(
             )
 
         # 确定报告生成模式
-        ai_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")
+        ai_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("OPENAI_API_KEY")
         ai_base_url = os.getenv("ANTHROPIC_BASE_URL") or os.getenv("OPENAI_BASE_URL")
         has_ai_config = bool(ai_api_key and ai_base_url)
 

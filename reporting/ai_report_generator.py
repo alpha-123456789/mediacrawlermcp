@@ -10,7 +10,27 @@ from typing import Any, Dict, List
 import jieba
 import jieba.analyse
 
-from reporting.auto_field_detector import AutoFieldDetector, get_standardized_value
+from reporting.llm_report_generator import PLATFORM_NAMES, REPORT_TYPE_NAMES
+
+
+def _safe_int(value, default=0):
+    """Safely convert value to int"""
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return default
+        value = value.replace(',', '')
+        try:
+            return int(float(value))
+        except:
+            return default
+    return default
+
+
 
 
 class SentimentAnalyzer:
@@ -59,13 +79,10 @@ class SentimentAnalyzer:
 
 
 class DataProfiler:
-    """数据特征分析器 - 使用自动字段识别，无需硬编码平台映射"""
+    """数据特征分析器 - field names are standardized by process_*_data functions"""
 
     def __init__(self, data: List[Dict]):
         self.data = data
-        # 自动识别字段映射
-        self.detector = AutoFieldDetector()
-        self.field_map = self.detector.detect_from_data_list(data)
 
     def _extract_competitors_from_content(self) -> Dict:
         """
@@ -202,20 +219,25 @@ class DataProfiler:
             "内容特征": content_analysis,
             "互动模式": engagement_pattern,
             "样例数据": self._get_samples(),
-            "_field_map": self.field_map  # 内部使用，用于调试
         }
 
     def _detect_fields(self) -> Dict[str, bool]:
-        """检测数据中包含哪些字段（基于自动识别的映射）"""
-        # 使用自动识别的字段映射来判断
+        """检测数据中包含哪些字段（直接从标准化 interact_info 读取）"""
+        has_likes = any(item.get("interact_info", {}).get("likes", 0) > 0 for item in self.data[:5])
+        has_comments_count = any(item.get("interact_info", {}).get("comments", 0) > 0 for item in self.data[:5])
+        has_views = any(item.get("interact_info", {}).get("views", 0) > 0 for item in self.data[:5])
+        has_shares = any(item.get("interact_info", {}).get("shares", 0) > 0 for item in self.data[:5])
+        has_favorites = any(item.get("interact_info", {}).get("favorites", 0) > 0 for item in self.data[:5])
+        has_coins = any(item.get("interact_info", {}).get("coins", 0) > 0 for item in self.data[:5])
+
         return {
-            "点赞": "likes" in self.field_map,
-            "评论数": "comments" in self.field_map,
+            "点赞": has_likes,
+            "评论数": has_comments_count,
             "评论内容": any(item.get('comments') for item in self.data[:5]),
-            "播放/阅读": "views" in self.field_map,
-            "分享/转发": "shares" in self.field_map,
-            "收藏": "favorites" in self.field_map,
-            "投币": "coins" in self.field_map,
+            "播放/阅读": has_views,
+            "分享/转发": has_shares,
+            "收藏": has_favorites,
+            "投币": has_coins,
             "标题": any(item.get('title') or item.get('desc') or item.get('caption')
                       for item in self.data[:3]),
             "作者": any(item.get('nickname') or item.get('author')
@@ -224,25 +246,23 @@ class DataProfiler:
                       for item in self.data[:3])
         }
 
-    def _get_standardized_value(self, item: Dict, standard_field: str) -> int:
-        """获取标准化字段值"""
-        return get_standardized_value(item, self.field_map, standard_field)
+    # interact_info is now standardized — access fields directly via item["interact_info"]
 
     def _calculate_stats(self) -> Dict:
         """计算数值统计"""
         stats = {"likes": 0, "comments": 0, "views": 0, "shares": 0}
 
         for item in self.data:
-            stats["likes"] += self._get_standardized_value(item, "likes")
-            stats["comments"] += self._get_standardized_value(item, "comments")
-            stats["views"] += self._get_standardized_value(item, "views")
-            stats["shares"] += self._get_standardized_value(item, "shares")
+            interact = item.get("interact_info", {})
+            stats["likes"] += _safe_int(interact.get("likes"))
+            stats["comments"] += _safe_int(interact.get("comments"))
+            stats["views"] += _safe_int(interact.get("views"))
+            stats["shares"] += _safe_int(interact.get("shares"))
 
         total = len(self.data)
         return {
             "总量": stats,
             "平均值": {k: round(v/total, 1) if total else 0 for k, v in stats.items()},
-            "最大值": self._get_max_values(),
             "数据质量": "高" if total > 10 else "中等" if total > 5 else "低"
         }
 
@@ -269,17 +289,18 @@ class DataProfiler:
 
     def _analyze_engagement(self) -> str:
         """分析互动模式"""
-        # 视频观看型：有播放量数据
-        if "views" in self.field_map:
+        items = self.data[:5]
+        has_views = any(item.get("interact_info", {}).get("views", 0) > 0 for item in items)
+        has_shares = any(item.get("interact_info", {}).get("shares", 0) > 0 for item in items)
+        has_comments = any(item.get("interact_info", {}).get("comments", 0) > 0 for item in items)
+
+        if has_views:
             return "视频观看型：重点是播放量、完播率、弹幕互动"
-        # 社交传播型：有转发数据
-        elif "shares" in self.field_map:
+        if has_shares:
             return "社交传播型：重点是转发、点赞、讨论热度"
-        # 内容讨论型：有评论数据
-        elif "comments" in self.field_map or any(item.get('comments') for item in self.data[:3]):
+        if has_comments or any(item.get('comments') for item in self.data[:3]):
             return "内容讨论型：重点是评论质量、用户反馈"
-        else:
-            return "基础展示型：重点是内容曝光、用户触达"
+        return "基础展示型：重点是内容曝光、用户触达"
 
     def _detect_content_type(self) -> str:
         """检测内容类型"""
@@ -297,16 +318,7 @@ class DataProfiler:
             return "观点/分析内容"
         return "综合内容"
 
-    def _get_max_values(self) -> Dict:
-        """获取各项最大值"""
-        max_values = {"likes": 0, "comments": 0, "views": 0}
 
-        for item in self.data:
-            max_values["likes"] = max(max_values["likes"], self._get_standardized_value(item, "likes"))
-            max_values["comments"] = max(max_values["comments"], self._get_standardized_value(item, "comments"))
-            max_values["views"] = max(max_values["views"], self._get_standardized_value(item, "views"))
-
-        return max_values
 
     def _get_samples(self) -> List[Dict]:
         """获取样例数据摘要"""
@@ -314,16 +326,10 @@ class DataProfiler:
         for item in self.data[:3]:
             if isinstance(item, dict):
                 interact = item.get('interact_info', {})
-                # 显示自动识别的映射关系
-                mapped = {}
-                for std_field, actual_field in self.field_map.items():
-                    if actual_field in interact:
-                        mapped[std_field] = interact[actual_field]
-
                 samples.append({
                     "title": (item.get('title') or item.get('desc', '') or item.get('caption', ''))[:50],
                     "author": item.get('nickname', item.get('author', '未知')),
-                    "interact": mapped or {k: v for k, v in interact.items() if v}
+                    "interact": {k: v for k, v in interact.items() if v}
                 })
         return samples
 
@@ -354,19 +360,19 @@ class DataProfiler:
         for item in self.data[:10]:
             if isinstance(item, dict):
                 interact = item.get('interact_info', {})
-                # 计算互动总分用于排序展示
-                score = (
-                    self._get_standardized_value(item, "likes") +
-                    self._get_standardized_value(item, "comments") * 2 +
-                    self._get_standardized_value(item, "views") * 0.1
-                )
+                likes = _safe_int(interact.get("likes"))
+                comments = _safe_int(interact.get("comments"))
+                views = _safe_int(interact.get("views"))
+                shares = _safe_int(interact.get("shares"))
+                score = likes + comments * 2 + views * 0.1
+
                 top_contents.append({
                     "title": (item.get('title') or item.get('desc', '') or item.get('caption', ''))[:100],
                     "author": item.get('nickname', item.get('author', '未知')),
-                    "likes": self._get_standardized_value(item, "likes"),
-                    "comments": self._get_standardized_value(item, "comments"),
-                    "views": self._get_standardized_value(item, "views"),
-                    "shares": self._get_standardized_value(item, "shares"),
+                    "likes": likes,
+                    "comments": comments,
+                    "views": views,
+                    "shares": shares,
                     "score": round(score, 1),
                     "comment_count": len(item.get('comments', []))
                 })
@@ -471,20 +477,6 @@ class DataProfiler:
 class AIReportPromptBuilder:
     """构建给 AI 的提示词"""
 
-    # 报告类型名称映射
-    REPORT_TYPE_NAMES = {
-        'sentiment': '舆情分析',
-        'trend': '热门趋势',
-        'volume': '声量分析',
-        'keyword': '关键词分析',
-        'hot_topics': '热门话题',
-        'viral_spread': '传播分析',
-        'influencer': '影响力账号',
-        'audience': '用户画像',
-        'comparison': '竞品对比',
-        'risk': '舆情风险'
-    }
-
     # 报告类型主题色
     REPORT_TYPE_THEMES = {
         'sentiment': '#667eea → #764ba2 (蓝紫色)',
@@ -512,14 +504,14 @@ class AIReportPromptBuilder:
 
         modules = {
             'sentiment': f"""### 4. 情感分析可视化（**最重要**）
-- 必须使用 ECharts 饼图，基于提供的 sentiment_distribution 数据
-- 饼图中每个扇区必须有明确的数据标签，例如"正面 65%"
+- **必须使用 ECharts 饼图**，创建 div 容器 `<div id="sentimentChart" style="width:100%;height:400px;"></div>`
+- 基于提供的 sentiment_distribution 数据，每个扇区有明确的数据标签，例如"正面 65%"
 - 图表下方用文字总结情感趋势
 - 结合评论热度（点赞数）分析情感权重
 - 关联帖子互动数据分析整体舆论走向""",
 
             'trend': f"""### 4. 热度趋势分析（**最重要**）
-- 使用 ECharts 折线图或柱状图展示热度变化趋势
+- **必须使用 ECharts 折线图或柱状图**，创建 div 容器 `<div id="trendChart" style="width:100%;height:400px;"></div>`
 - 基于帖子发布时间（如果有）绘制时间序列图
 - 标注热度高峰点，分析热点事件
 - 下方文字总结：话题热度处于什么阶段（上升期/爆发期/衰退期）
@@ -527,7 +519,7 @@ class AIReportPromptBuilder:
 - 如果有情感数据可辅助分析：{sentiment_dist}""",
 
             'volume': f"""### 4. 声量分布分析（**最重要**）
-- 使用 ECharts 柱状图或雷达图展示声量指标
+- **必须使用 ECharts 柱状图或雷达图**，创建 div 容器 `<div id="volumeChart" style="width:100%;height:400px;"></div>`
 - 声量维度包括：内容数量、总点赞、总评论、总曝光
 - 对比各项指标的占比分布
 - 下方文字总结：整体声量级别（高/中/低）
@@ -535,7 +527,7 @@ class AIReportPromptBuilder:
 - 情感分布参考（如有评论数据）：{sentiment_dist}""",
 
             'keyword': f"""### 4. 关键词关联分析（**最重要**）
-- 使用 ECharts 关系图或桑基图展示关键词关联
+- **必须使用 ECharts 关系图或桑基图**，创建 div 容器 `<div id="keywordChart" style="width:100%;height:450px;"></div>`
 - 核心关键词居中，关联词围绕分布
 - 用线条粗细表示关联强度
 - 下方文字总结：核心关键词是什么，与哪些词关联最紧密
@@ -543,7 +535,8 @@ class AIReportPromptBuilder:
 - 情感分布参考：{sentiment_dist}""",
 
             'hot_topics': f"""### 4. 话题热度排行（**最重要**）
-- 使用 ECharts 横向柱状图展示 TOP 10 热门话题
+- **必须使用 ECharts 横向柱状图展示**，创建 div 容器 `<div id="topicHeatChart" style="width:100%;height:500px;"></div>`
+- 从热词数据中提炼 TOP 10 热门话题，按热度值排序
 - 每个话题标注热度值和出现频次
 - 用颜色区分话题类型（产品/服务/活动/人物等）
 - 下方文字总结：最热门的话题是什么，为什么火
@@ -551,23 +544,23 @@ class AIReportPromptBuilder:
 - 情感分布参考：{sentiment_dist}""",
 
             'viral_spread': f"""### 4. 传播路径分析（**最重要**）
-- 使用 ECharts 桑基图或关系图展示传播链路
-- 分析内容从发布到扩散的传播节点
+- **必须使用 ECharts 桑基图或关系图**，创建 div 容器 `<div id="viralChart" style="width:100%;height:450px;"></div>`
+- 分析内容从发布到扩散的传播链路
 - 标注关键传播者（点赞/分享高的用户）
 - 下方文字总结：传播模式是什么（病毒式/圈层式/线性式）
 - 传播关键节点和加速因素分析
 - 情感在传播过程中的变化：{sentiment_dist}""",
 
             'influencer': f"""### 4. 影响力账号排行（**最重要**）
-- 使用 ECharts 横向柱状图展示 TOP 10 影响力账号
-- 排序依据：总互动量（点赞+评论+分享）
+- **必须使用 ECharts 横向柱状图展示**，创建 div 容器 `<div id="influencerChart" style="width:100%;height:500px;"></div>`
+- 按总互动量（点赞+评论+分享）排序 TOP 10
 - 每个账号展示：发布内容数、平均互动、粉丝影响力
 - 下方文字总结：谁是核心意见领袖，有什么特征
 - 分析头部账号的内容策略和互动特点
 - 这些账号的评论区情感倾向：{sentiment_dist}""",
 
             'audience': f"""### 4. 用户画像分析（**最重要**）
-- 使用 ECharts 饼图或雷达图展示用户特征分布
+- **必须使用 ECharts 饼图或雷达图**，创建 div 容器 `<div id="audienceChart" style="width:100%;height:400px;"></div>`
 - 维度包括：互动活跃度、评论情感倾向、参与深度
 - 用不同颜色区分用户类型（积极/观望/负面）
 - 下方文字总结：核心用户群体特征是什么
@@ -575,7 +568,7 @@ class AIReportPromptBuilder:
 - 用户情感分布：{sentiment_dist}""",
 
             'comparison': f"""### 4. 竞品对比雷达图（**最重要**）
-- 使用 ECharts 雷达图展示多维度对比
+- **必须使用 ECharts 雷达图**，创建 div 容器 `<div id="comparisonChart" style="width:100%;height:450px;"></div>`
 - 维度包括：声量、互动率、正面评价率、传播力、关注度
 - 被分析对象 vs 竞品进行直观对比
 - 下方文字总结：各维度的优劣势分析
@@ -583,7 +576,7 @@ class AIReportPromptBuilder:
 - 情感对比数据：{sentiment_dist}""",
 
             'risk': f"""### 4. 舆情风险评估可视化（**最重要**）
-- 使用 ECharts 仪表盘或饼图展示风险等级
+- **必须使用 ECharts 仪表盘或饼图**，创建 div 容器 `<div id="riskChart" style="width:100%;height:400px;"></div>`
 - 风险维度：负面评价占比、负面词频、传播速度、影响范围
 - 用红色系突出显示高风险区域
 - 下方文字总结：当前风险等级（高危/中危/低危/正常）
@@ -613,15 +606,19 @@ class AIReportPromptBuilder:
 
         # 热门内容模块（所有报告类型都有）
         content_module = """### 3. 热门内容 TOP 10 排行榜
-使用上面提供的真实数据，每项展示：
-- 排名、标题、作者
-- 互动数据（点赞/评论/播放）
-- 简短分析为什么这条内容受欢迎"""
+- **必须使用 ECharts 横向柱状图（bar chart）渲染**，不能用纯表格展示
+- 创建 div 容器：`<div id="topContentsChart" style="width:100%;height:500px;"></div>`
+- X轴=综合得分/互动数据，Y轴=内容标题
+- 每个柱子标注：排名、标题（截取前15字）、作者、点赞/评论/播放数
+- Tooltip 中展示完整标题和完整互动数据
+- 使用 prompt 中提供的 top_contents JSON 数据"""
 
         # 热词模块
         hotword_module = """### 5. 热词综合分析
+- **必须使用 ECharts 词云图渲染**，创建 div 容器 `<div id="wordCloudChart" style="width:100%;height:450px;"></div>`
 - 热词云图：帖子高频词 + 评论高频词
-- 每个热词标注频次"""
+- 每个热词标注频次/权重值，字体大小反映权重
+- 词云图需要引入 echarts-wordcloud 扩展：<script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2.1.0/dist/echarts-wordcloud.min.js"></script>"""
 
         # 评论分析模块（仅舆情类和风险类报告显示）
         comment_module = ""
@@ -759,37 +756,18 @@ class AIReportPromptBuilder:
 
     def build_prompt(self) -> str:
         """构建完整的提示词"""
-        platform_names = {
-            'xhs': '小红书', 'dy': '抖音', 'ks': '快手', 'bili': 'B站',
-            'wb': '微博', 'tieba': '百度贴吧', 'zhihu': '知乎'
-        }
-        platform_name = platform_names.get(self.platform, self.platform)
-        report_type_name = self.REPORT_TYPE_NAMES.get(self.report_type, '舆情分析')
+        platform_name = PLATFORM_NAMES.get(self.platform, self.platform)
+        report_type_name = REPORT_TYPE_NAMES.get(self.report_type, '舆情分析')
 
         fields = self.profile.get("数据结构", {})
         stats = self.profile.get("数值统计", {})
         content = self.profile.get("内容特征", {})
         detailed_data = self.profile.get("详细数据", {})
 
-        # 根据报告类型构建数据特征描述
-        features_desc = []
-        if fields.get("点赞"):
-            avg_likes = stats.get("平均值", {}).get("likes", 0)
-            features_desc.append(f"有点赞数据，平均{avg_likes:.0f}赞")
-        if fields.get("评论内容"):
-            features_desc.append("有评论内容，可做情感分析")
-        if fields.get("播放/阅读"):
-            avg_views = stats.get("平均值", {}).get("views", 0)
-            features_desc.append(f"有播放数据，平均{avg_views:.0f}播放")
-        if fields.get("收藏"):
-            features_desc.append("有收藏数据")
-        if fields.get("分享/转发"):
-            features_desc.append("有转发数据")
-
         # 格式化详细数据
         top_contents_str = json.dumps(detailed_data.get("top_contents", []), ensure_ascii=False, indent=2)
         hot_words_str = json.dumps(detailed_data.get("hot_words", []), ensure_ascii=False, indent=2)
-        sentiment_dist = json.dumps(detailed_data.get("sentiment_distribution", {}), ensure_ascii=False)
+        sentiment_dist = json.dumps(detailed_data.get("sentiment_distribution", []), ensure_ascii=False)
         positive_examples = json.dumps(detailed_data.get("positive_examples", [])[:5], ensure_ascii=False, indent=2)
         negative_examples = json.dumps(detailed_data.get("negative_examples", [])[:5], ensure_ascii=False, indent=2)
         all_comments = json.dumps(detailed_data.get("representative_comments", [])[:10], ensure_ascii=False, indent=2)
@@ -834,6 +812,13 @@ class AIReportPromptBuilder:
 ```json
 {top_contents_str}
 ```
+
+【重要：JavaScript 字符串转义】
+- 将上述 JSON 数据嵌入 JavaScript 时，**必须正确处理所有引号**
+- 标题、作者等字段中可能包含引号（如"微信派"），必须使用反斜杠转义：`\"`
+- 或使用单引号包裹 JavaScript 字符串：`'标题包含"微信派"'`
+- **特别注意 Emoji 和特殊 Unicode 字符**：不要使用 UTF-16 surrogate pair 表示（如 😁），直接保留原始字符（如 😁）
+- **引号未转义会导致 JavaScript 语法错误，使所有图表无法渲染**
 
 ## 热词分析 [必须用 ECharts 词云图渲染这些数据]
 ```json
@@ -898,14 +883,7 @@ class AIReportPromptBuilder:
 6. **每个模块有明显的视觉区分**，使用卡片式设计
 7. **模块4是最重要的可视化模块**，必须使用 ECharts 渲染
 
-请输出完整的、独立的 HTML 代码（包含 CSS 和 JavaScript）。
-2. **洞察要具体，必须引用真实评论作为依据**，如"用户 @xxx 在评论中提到'xxx'"
-3. **建议要有可操作性**，不要泛泛而谈
-4. **使用 ECharts 绘制图表**，响应式布局
-5. **中文显示，美观专业，布局宽松舒适**
-6. **每个模块有明显的视觉区分**，使用卡片式设计
-
-请输出完整的、独立的 HTML 代码（包含 CSS 和 JavaScript）。"""
+请输出完整的、独立的 HTML 代码（包含 CSS 和 JavaScript），但**严禁在 </html> 之后添加任何解释文字**。"""
 
 
 def generate_ai_report_data(
@@ -950,19 +928,15 @@ def generate_ai_report_data(
 # =========================
 
 class MultiPlatformDataProfiler:
-    """多平台数据特征分析器"""
+    """多平台数据特征分析器 — 字段名已由 process_*_data 标准化"""
 
     def __init__(self, platform_data: Dict[str, List[Dict]]):
         self.platform_data = platform_data
-        # 合并所有数据
         self.all_data = []
         for platform, data in platform_data.items():
             for item in data:
                 item['_platform'] = platform
                 self.all_data.append(item)
-
-        self.detector = AutoFieldDetector()
-        self.field_map = self.detector.detect_from_data_list(self.all_data)
 
     def analyze(self) -> Dict:
         """生成多平台合并的数据画像"""
@@ -1003,10 +977,11 @@ class MultiPlatformDataProfiler:
         stats = {"likes": 0, "comments": 0, "views": 0, "shares": 0}
 
         for item in self.all_data:
-            stats["likes"] += get_standardized_value(item, self.field_map, "likes")
-            stats["comments"] += get_standardized_value(item, self.field_map, "comments")
-            stats["views"] += get_standardized_value(item, self.field_map, "views")
-            stats["shares"] += get_standardized_value(item, self.field_map, "shares")
+            interact = item.get("interact_info", {})
+            stats["likes"] += _safe_int(interact.get("likes"))
+            stats["comments"] += _safe_int(interact.get("comments"))
+            stats["views"] += _safe_int(interact.get("views"))
+            stats["shares"] += _safe_int(interact.get("shares"))
 
         total = len(self.all_data)
         return {
@@ -1102,16 +1077,13 @@ class MultiPlatformDataProfiler:
             top_contents = []
             for item in data[:5]:
                 if isinstance(item, dict):
-                    likes = get_standardized_value(item, self.field_map, "likes")
-                    comments = get_standardized_value(item, self.field_map, "comments")
-                    views = get_standardized_value(item, self.field_map, "views")
-
+                    interact = item.get("interact_info", {})
                     top_contents.append({
                         "title": (item.get('title') or item.get('desc', '') or item.get('caption', ''))[:100],
                         "author": item.get('nickname', '匿名'),
-                        "likes": likes,
-                        "comments": comments,
-                        "views": views
+                        "likes": _safe_int(interact.get("likes")),
+                        "comments": _safe_int(interact.get("comments")),
+                        "views": _safe_int(interact.get("views"))
                     })
             platform_top_contents[platform] = top_contents
 
@@ -1154,19 +1126,8 @@ def generate_multi_platform_report_data(
     detailed_data = profiler.get_detailed_data()
 
     # 构建多平台提示词
-    platform_names = {
-        'xhs': '小红书', 'dy': '抖音', 'ks': '快手', 'bili': 'B站',
-        'wb': '微博', 'tieba': '百度贴吧', 'zhihu': '知乎'
-    }
-    platforms_str = ', '.join([platform_names.get(p, p) for p in platform_data.keys()])
-
-    report_type_names = {
-        'sentiment': '舆情分析', 'trend': '热门趋势', 'volume': '声量分析',
-        'keyword': '关键词分析', 'hot_topics': '热门话题', 'viral_spread': '传播分析',
-        'influencer': '影响力账号', 'audience': '用户画像',
-        'comparison': '竞品对比', 'risk': '舆情风险'
-    }
-    report_type_name = report_type_names.get(report_type, '舆情分析')
+    platforms_str = ', '.join([PLATFORM_NAMES.get(p, p) for p in platform_data.keys()])
+    report_type_name = REPORT_TYPE_NAMES.get(report_type, '舆情分析')
 
     # 统计数据
     stats = profile.get("数值统计", {})
@@ -1195,7 +1156,7 @@ def generate_multi_platform_report_data(
 - 报告类型: {report_type_name}
 - 覆盖平台: {platforms_str}
 - 总数据量: {profile.get("总数据量")} 条
-- 平台分布: {json.dumps({platform_names.get(p, p): c for p, c in platform_stats.items()}, ensure_ascii=False)}
+- 平台分布: {json.dumps({PLATFORM_NAMES.get(p, p): c for p, c in platform_stats.items()}, ensure_ascii=False)}
 
 ## 跨平台统计数据
 - 总点赞: {totals.get('likes', 0)}
@@ -1208,6 +1169,12 @@ def generate_multi_platform_report_data(
 ```json
 {top_contents_str}
 ```
+
+【重要：JavaScript 字符串转义】
+- 将上述 JSON 数据嵌入 JavaScript 时，**必须正确处理所有引号**
+- 标题、作者等字段中可能包含引号，必须使用反斜杠转义：`\"`
+- **特别注意 Emoji 和特殊 Unicode 字符**：不要使用 UTF-16 surrogate pair 表示（如 😁），直接保留原始字符（如 😁）
+- **引号未转义会导致 JavaScript 语法错误，使所有图表无法渲染**
 
 ## 跨平台热词分析
 ```json
@@ -1240,17 +1207,20 @@ def generate_multi_platform_report_data(
 - 各平台情感倾向对比（如有评论数据）
 
 ### 4. 情感分析可视化（**最重要**）
-- 使用 ECharts 饼图展示整体情感分布
+- **必须使用 ECharts 饼图**，创建 div 容器 `<div id="sentimentChart" style="width:100%;height:400px;"></div>`
+- 展示整体情感分布
 - 如果有各平台评论数据，增加各平台情感对比柱状图
 
 ### 5. 跨平台热门内容排行
+- **必须使用 ECharts 横向柱状图渲染**，创建 div 容器 `<div id="multiPlatformTopChart" style="width:100%;height:500px;"></div>`
 - 展示各平台TOP热门内容
 - 标注平台来源
 - 跨平台内容热度对比分析
 
 ### 6. 热词云图（**最重要**）
-- 使用 ECharts 词云图展示所有平台的综合热词
-- 标注热词在所有平台的关注度
+- **必须使用 ECharts 词云图渲染**，创建 div 容器 `<div id="wordCloudChart" style="width:100%;height:450px;"></div>`
+- 展示所有平台的综合热词，标注热词在所有平台的关注度
+- 需要引入 echarts-wordcloud 扩展
 
 ### 7. 跨平台洞察与建议
 生成4-6条跨平台洞察，每条包含：
@@ -1279,7 +1249,7 @@ def generate_multi_platform_report_data(
 5. **中文显示，美观专业**
 6. **多平台数据要有明确的平台标识**（使用平台logo或名称）
 
-请输出完整的、独立的 HTML 代码（包含 CSS 和 JavaScript）。"""
+请输出完整的、独立的 HTML 代码（包含 CSS 和 JavaScript），但**严禁在 </html> 之后添加任何解释文字**。"""
 
     return {
         "prompt": prompt,

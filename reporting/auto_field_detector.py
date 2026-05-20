@@ -32,19 +32,19 @@ class AutoFieldDetector:
             "value_type": "number",
             "priority": 100
         },
+        "comments": {
+            "keywords": ["comment", "reply", "replay", "discuss", "talk", "message", "danmaku", "dm", "bullet",
+                        "评论", "回复", "讨论", "留言", "弹幕", "评价", "点评"],
+            "exclude": [],
+            "value_type": "number",
+            "priority": 95  # Increased from 90 to take precedence over views when field name contains replay/reply
+        },
         "views": {
             "keywords": ["view", "play", "watch", "read", "pv", "visit", "impression", "expose",
                         "观看", "播放", "阅读", "浏览", "访问量", "曝光", "展现", "点击"],
             "exclude": ["review", "preview"],
             "value_type": "number",
-            "priority": 95
-        },
-        "comments": {
-            "keywords": ["comment", "reply", "discuss", "talk", "message", "danmaku", "dm", "bullet",
-                        "评论", "回复", "讨论", "留言", "弹幕", "评价", "点评"],
-            "exclude": [],
-            "value_type": "number",
-            "priority": 90
+            "priority": 90  # Decreased from 95 to let comments match first
         },
         "shares": {
             "keywords": ["share", "repost", "forward", "transmit", "spread", "retweet",

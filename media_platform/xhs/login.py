@@ -59,12 +59,14 @@ class XiaoHongShuLogin(AbstractLogin):
             # XPath Explanation: Find a span with text "Me" inside an anchor tag (<a>) 
             # whose href attribute contains "/user/profile/"
             user_profile_selector = "xpath=//*[@id='global']/div[2]/div[1]/ul/div[1]/div[1]"
-            
+            text = await self.context_page.inner_text(user_profile_selector)
             # Set a short timeout since this is called within a retry loop
             is_visible = await self.context_page.is_visible(user_profile_selector, timeout=500)
-            if is_visible:
+            if is_visible and "我" in text:
                 utils.logger.info("[XiaoHongShuLogin.check_login_state] Login status confirmed by UI element ('Me' button).")
                 return True
+            else:
+                utils.logger.info("目前登录状态：未登录，等待登录")
         except Exception:
             pass
 

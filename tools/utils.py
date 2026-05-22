@@ -20,19 +20,44 @@
 
 import argparse
 import logging
+import os
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
 
 from .crawler_util import *
 from .slider_util import *
 from .time_util import *
 
+# 项目根目录（绝对路径，不依赖 cwd）
+_PROJECT_ROOT = Path(__file__).parent.parent
+
 
 def init_loging_config():
     level = logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(name)s %(levelname)s (%(filename)s:%(lineno)d) - %(message)s",
-        datefmt='%Y-%m-%d %H:%M:%S'
+    fmt = logging.Formatter(
+        fmt="%(asctime)s %(name)s %(levelname)s (%(filename)s:%(lineno)d) - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+    # 控制台输出
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(fmt)
+
+    # 文件输出：logs/mediacrawler_YYYY-MM-DD.log，每日一个文件，保留 30 天
+    log_dir = _PROJECT_ROOT / "logs"
+    log_dir.mkdir(exist_ok=True)
+    file_handler = TimedRotatingFileHandler(
+        filename=log_dir / "mediacrawler.log",
+        when="midnight",
+        interval=1,
+        backupCount=30,
+        encoding="utf-8",
+    )
+    file_handler.suffix = "%Y-%m-%d"
+    file_handler.setFormatter(fmt)
+
+    logging.basicConfig(level=level, handlers=[console_handler, file_handler])
+
     _logger = logging.getLogger("MediaCrawler")
     _logger.setLevel(level)
 

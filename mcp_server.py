@@ -112,27 +112,29 @@ mcp = FastMCP("mediacrawlermcp", host=_mcp_host, transport_security=_mcp_transpo
 # =========================
 
 def safe_int(value, default=0):
-    """安全转换为整数，支持字符串格式如 '1.2万', '1k', '1,000'"""
-    if value is None:
-        return default
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        value = value.strip()
-        if not value:
+    """安全转换为整数，支持字符串格式如 '1.2万', '1k', '1,000', '10万+', '10+'"""
+    try:
+        if value is None:
             return default
-        # 中文单位
-        if '万' in value:
-            return int(float(value.replace('万', '')) * 10000)
-        if 'k' in value.lower():
-            return int(float(value.lower().replace('k', '')) * 1000)
-        # 移除逗号
-        value = value.replace(',', '')
-        try:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return default
+            # 去掉尾部 '+' 符号（如 "10+", "10万+"）
+            value = value.rstrip('+')
+            # 中文单位
+            if '万' in value:
+                return int(float(value.replace('万', '')) * 10000)
+            if 'k' in value.lower():
+                return int(float(value.lower().replace('k', '')) * 1000)
+            # 移除逗号
+            value = value.replace(',', '')
             return int(float(value))
-        except:
-            return default
-    return default
+        return default
+    except (ValueError, TypeError):
+        return default
 
 
 # =========================
@@ -182,15 +184,16 @@ def process_xhs_data(data: List[Dict]) -> List[Dict]:
         elif post.get("user"):
             author_nickname = post["user"].get("nickname", "")
 
-        interact = post.get("interact_info", {})
+        # API返回camelCase(interactInfo)，HTML解析后decamelize为snake_case(interact_info)
+        interact = post.get("interact_info") or post.get("interactInfo") or {}
         items.append({
             "note_id": post.get("note_id", ""),
             "title": post.get("title", ""),
             "nickname": author_nickname,
             "interact_info": {
-                "likes": safe_int(interact.get("likeCount")),
-                "comments": safe_int(interact.get("commentCount")),
-                "favorites": safe_int(interact.get("collectCount")),
+                "likes": safe_int(interact.get("liked_count") or interact.get("likedCount") or interact.get("likeCount")),
+                "comments": safe_int(interact.get("comment_count") or interact.get("commentCount")),
+                "favorites": safe_int(interact.get("collected_count") or interact.get("collectCount")),
             },
             "desc": post.get("desc", ""),
             "comments": comment_list

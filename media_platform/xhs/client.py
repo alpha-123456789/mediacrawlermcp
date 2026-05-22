@@ -221,29 +221,48 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         headers = await self._pre_headers(uri, params={})
         async with httpx.AsyncClient(proxy=self.proxy) as client:
             response = await client.get(f"{self._host}{uri}", headers=headers)
+            utils.logger.info(
+                f"[XiaoHongShuClient.query_self] selfinfo:url={self._host}{uri} headers={headers} status_code={response.status_code},content:{response.text}")
             if response.status_code == 200:
                 return response.json()
         return None
 
     async def pong(self) -> bool:
         """
-        Check if login state is still valid by querying self user info
-        Returns:
-            bool: True if logged in, False otherwise
+        Check login state via cookie + page DOM double verification.
+
+        Step 1: web_session cookie must exist (fast pre-check).
+        Step 2: Confirm the session is still valid by reading the page DOM —
+                the login button (#login-btn) is only present when NOT logged in.
+                A stale web_session in a persistent browser profile would pass
+                step 1 but fail step 2, correctly triggering re-login.
+
+        query_self is intentionally NOT called: it requires a valid X-S/X-T
+        signature which depends on XHS JS being loaded, causing false 406 errors.
         """
-        utils.logger.info("[XiaoHongShuClient.pong] Begin to check login state...")
-        ping_flag = False
+        utils.logger.info("[XiaoHongShuClient.pong] Checking login state via cookie + DOM...")
+        web_session = self.cookie_dict.get("web_session", "")
+        if not web_session:
+            utils.logger.info("[XiaoHongShuClient.pong] web_session not found → login required.")
+            return False
+
+        # web_session exists in cookie dict, but may be expired — verify via page DOM
         try:
-            self_info: Dict = await self.query_self()
-            if self_info and self_info.get("data", {}).get("result", {}).get("success"):
-                ping_flag = True
+            login_btn = await self.playwright_page.query_selector("#login-btn, button.login-btn")
+            if login_btn:
+                utils.logger.info(
+                    "[XiaoHongShuClient.pong] web_session present but login button visible → session expired, need re-login."
+                )
+                return False
+            utils.logger.info("[XiaoHongShuClient.pong] web_session valid, no login button → already logged in.")
+            return True
         except Exception as e:
-            utils.logger.error(
-                f"[XiaoHongShuClient.pong] Check login state failed: {e}, and try to login again..."
+            # Page not ready or selector failed — fall back to cookie-only check
+            utils.logger.warning(
+                f"[XiaoHongShuClient.pong] DOM check failed ({e}), falling back to cookie-only check."
             )
-            ping_flag = False
-        utils.logger.info(f"[XiaoHongShuClient.pong] Login state result: {ping_flag}")
-        return ping_flag
+            utils.logger.info("[XiaoHongShuClient.pong] web_session found → assuming logged in.")
+            return True
 
     async def update_cookies(self, browser_context: BrowserContext):
         """
@@ -317,7 +336,13 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
             "xsec_token": xsec_token,
         }
         uri = "/api/sns/web/v1/feed"
+        utils.logger.info(
+            f"[XiaoHongShuClient.get_note_by_id] get param note id:{note_id}  data:{data}"
+        )
         res = await self.post(uri, data)
+        utils.logger.info(
+            f"[XiaoHongShuClient.get_note_by_id] get response and res:{res}"
+        )
         if res and res.get("items"):
             res_dict: Dict = res["items"][0]["note_card"]
             return res_dict

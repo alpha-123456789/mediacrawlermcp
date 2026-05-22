@@ -24,13 +24,16 @@ import sys
 from typing import Optional
 
 from playwright.async_api import BrowserContext, Page
-from tenacity import (RetryError, retry, retry_if_result, stop_after_attempt,
-                      wait_fixed)
 
 import config
 from base.base_crawler import AbstractLogin
 from cache.cache_factory import CacheFactory
 from tools import utils
+
+
+class LoginTimeoutError(Exception):
+    """Raised when QR code or phone login exceeds the wait limit."""
+    pass
 
 
 class XiaoHongShuLogin(AbstractLogin):
@@ -48,43 +51,68 @@ class XiaoHongShuLogin(AbstractLogin):
         self.login_phone = login_phone
         self.cookie_str = cookie_str
 
-    @retry(stop=stop_after_attempt(600), wait=wait_fixed(1), retry=retry_if_result(lambda value: value is False))
-    async def check_login_state(self, no_logged_in_session: str) -> bool:
+    async def check_login_state(self, no_logged_in_session: str, max_wait: int = 600) -> bool:
         """
-        Verify login status using dual-check: UI elements and Cookies.
+        Poll every second until login is detected (up to max_wait seconds).
+
+        Two signals:
+        1. UI: after login the placeholder "我" div is replaced by a real <li><a> nav link,
+           AND the "登录" button disappears. We check both conditions together to avoid the
+           false-positive where the unlogged placeholder <div class="bottom-channel bottom-menu-component">
+           also contains the text "我".
+        2. Cookie: web_session value changes from the pre-login baseline.
+           If no_logged_in_session is falsy we skip cookie comparison to avoid
+           false positives when the browser already has an old session in its profile.
         """
-        # 1. Priority check: Check if the "Me" (Profile) node appears in the sidebar
-        try:
-            # Selector for elements containing "Me" text with a link pointing to the profile
-            # XPath Explanation: Find a span with text "Me" inside an anchor tag (<a>) 
-            # whose href attribute contains "/user/profile/"
-            user_profile_selector = "xpath=//*[@id='global']/div[2]/div[1]/ul/div[1]/div[1]"
-            text = await self.context_page.inner_text(user_profile_selector)
-            # Set a short timeout since this is called within a retry loop
-            is_visible = await self.context_page.is_visible(user_profile_selector, timeout=500)
-            if is_visible and "我" in text:
-                utils.logger.info("[XiaoHongShuLogin.check_login_state] Login status confirmed by UI element ('Me' button).")
-                return True
-            else:
-                utils.logger.info("目前登录状态：未登录，等待登录")
-        except Exception:
-            pass
+        for attempt in range(max_wait):
+            # 1. UI check — two conditions must both be true to confirm login:
+            #    a) The login button (#login-btn) is gone
+            #    b) A real <li><a> link containing "我" exists in the nav (not the placeholder <div>)
+            try:
+                login_btn = await self.context_page.query_selector("#login-btn, button.login-btn")
+                if not login_btn:
+                    # Login button gone — verify "我" appears as a real nav <li> link
+                    wo_li = await self.context_page.query_selector(
+                        "xpath=//*[@id='global']//li[.//a[contains(., '我')]]"
+                    )
+                    if wo_li:
+                        utils.logger.info(
+                            "[XiaoHongShuLogin.check_login_state] Login confirmed by UI (login btn gone + '我' li exists)."
+                        )
+                        return True
+                utils.logger.info(f"等待扫码登录... ({attempt + 1}/{max_wait}s)")
+            except Exception:
+                pass
 
-        # 2. Alternative: Check for CAPTCHA prompt
-        if "请通过验证" in await self.context_page.content():
-            utils.logger.info("[XiaoHongShuLogin.check_login_state] CAPTCHA appeared, please verify manually.")
+            # 2. CAPTCHA hint
+            try:
+                if "请通过验证" in await self.context_page.content():
+                    utils.logger.info(
+                        "[XiaoHongShuLogin.check_login_state] CAPTCHA appeared, please verify manually."
+                    )
+            except Exception:
+                pass
 
-        # 3. Compatibility fallback: Original Cookie-based change detection
-        current_cookie = await self.browser_context.cookies()
-        _, cookie_dict = utils.convert_cookies(current_cookie)
-        current_web_session = cookie_dict.get("web_session")
-        
-        # If web_session has changed, consider the login successful
-        if current_web_session and current_web_session != no_logged_in_session:
-            utils.logger.info("[XiaoHongShuLogin.check_login_state] Login status confirmed by Cookie (web_session changed).")
-            return True
+            # 3. Cookie change — only compare if we captured a non-empty baseline.
+            #    When no_logged_in_session is None/empty we can't distinguish a
+            #    pre-existing cookie (already in the Chrome profile) from a newly
+            #    set one, so we skip this check to avoid an immediate false positive.
+            if no_logged_in_session:
+                try:
+                    current_cookie = await self.browser_context.cookies()
+                    _, cookie_dict = utils.convert_cookies(current_cookie)
+                    current_web_session = cookie_dict.get("web_session")
+                    if current_web_session and current_web_session != no_logged_in_session:
+                        utils.logger.info(
+                            "[XiaoHongShuLogin.check_login_state] Login confirmed by Cookie change."
+                        )
+                        return True
+                except Exception:
+                    pass
 
-        return False
+            await asyncio.sleep(1)
+
+        raise LoginTimeoutError(f"Login wait timed out after {max_wait}s")
 
     async def begin(self):
         """Start login xiaohongshu"""
@@ -105,7 +133,7 @@ class XiaoHongShuLogin(AbstractLogin):
         try:
             # After entering Xiaohongshu homepage, the login dialog may not pop up automatically, need to manually click login button
             login_button_ele = await self.context_page.wait_for_selector(
-                selector="xpath=//*[@id='global']/div[2]/div[1]/ul/div[1]/li[5]/div",
+                selector="xpath=//*[@id='global']/div[2]/div[1]/ul/div[1]/div[1]",
                 timeout=5000
             )
             await login_button_ele.click()
@@ -156,11 +184,7 @@ class XiaoHongShuLogin(AbstractLogin):
             # TODO: Should also check if the verification code is correct, as it may be incorrect
             break
 
-        try:
-            await self.check_login_state(no_logged_in_session)
-        except RetryError:
-            utils.logger.info("[XiaoHongShuLogin.login_by_mobile] Login xiaohongshu failed by mobile login method ...")
-            sys.exit()
+        await self.check_login_state(no_logged_in_session)
 
         wait_redirect_seconds = 5
         utils.logger.info(f"[XiaoHongShuLogin.login_by_mobile] Login successful then wait for {wait_redirect_seconds} seconds redirect ...")
@@ -180,14 +204,14 @@ class XiaoHongShuLogin(AbstractLogin):
             utils.logger.info("[XiaoHongShuLogin.login_by_qrcode] login failed , have not found qrcode please check ....")
             # if this website does not automatically popup login dialog box, we will manual click login button
             await asyncio.sleep(0.5)
-            login_button_ele = self.context_page.locator("xpath=//*[@id='global']/div[2]/div[1]/ul/div[1]/li[5]/div")
+            login_button_ele = self.context_page.locator("xpath=//*[@id='global']/div[2]/div[1]/ul/div[1]/div[1]")
             await login_button_ele.click(timeout=5000)
             base64_qrcode_img = await utils.find_login_qrcode(
                 self.context_page,
                 selector=qrcode_img_selector
             )
             if not base64_qrcode_img:
-                sys.exit()
+                raise LoginTimeoutError("Could not find QR code for login after clicking login button")
 
         # get not logged session
         current_cookie = await self.browser_context.cookies()
@@ -201,12 +225,8 @@ class XiaoHongShuLogin(AbstractLogin):
         partial_show_qrcode = functools.partial(utils.show_qrcode, base64_qrcode_img)
         asyncio.get_running_loop().run_in_executor(executor=None, func=partial_show_qrcode)
 
-        utils.logger.info(f"[XiaoHongShuLogin.login_by_qrcode] waiting for scan code login, remaining time is 120s")
-        try:
-            await self.check_login_state(no_logged_in_session)
-        except RetryError:
-            utils.logger.info("[XiaoHongShuLogin.login_by_qrcode] Login xiaohongshu failed by qrcode login method ...")
-            sys.exit()
+        utils.logger.info(f"[XiaoHongShuLogin.login_by_qrcode] waiting for scan code login, remaining time is 600s")
+        await self.check_login_state(no_logged_in_session)
 
         wait_redirect_seconds = 5
         utils.logger.info(f"[XiaoHongShuLogin.login_by_qrcode] Login successful then wait for {wait_redirect_seconds} seconds redirect ...")

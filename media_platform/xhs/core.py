@@ -155,14 +155,22 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     if not notes_res or not notes_res.get("has_more", False):
                         utils.logger.info("[XiaoHongShuCrawler.search] No more content!")
                         break
+                    utils.logger.info(f"[XiaoHongShuCrawler.search] Search notes response: {notes_res}")
                     semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+                    valid_items = [
+                        item
+                        for item in notes_res.get("items", [])
+                        if item.get("model_type") not in ("rec_query", "hot_query")
+                    ]
+
                     task_list = [
                         self.get_note_detail_async_task(
                             note_id=post_item.get("id"),
                             xsec_source=post_item.get("xsec_source"),
                             xsec_token=post_item.get("xsec_token"),
                             semaphore=semaphore,
-                        ) for post_item in notes_res.get("items", {}) if post_item.get("model_type") not in ("rec_query", "hot_query")
+                        )
+                        for post_item in valid_items[:config.CRAWLER_MAX_NOTES_COUNT]
                     ]
                     note_details = await asyncio.gather(*task_list)
                     for note_detail in note_details:
